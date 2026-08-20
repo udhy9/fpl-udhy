@@ -1,0 +1,97 @@
+name: FPL Automated Manager
+
+on:
+  schedule:
+    # Every 30 minutes so T-90 (dry-run) and T-60 (execute) windows are not missed.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Execution mode'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - execute
+
+permissions:
+  contents: write
+
+jobs:
+  fpl_manager:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Select mode from deadline
+        id: mode
+        run: |
+          if [ -n "${{ github.event.inputs.mode }}" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python - <<'PY'
+          import os
+          import requests
+          from datetime import datetime, timezone
+
+          data = requests.get(
+              "https://fantasy.premierleague.com/api/bootstrap-static/",
+              timeout=30,
+              headers={"User-Agent": "fpl-udhy-agent"},
+          ).json()
+          event = next((e for e in data["events"] if e.get("is_next")), None)
+          if event is None:
+              event = next(
+                  (e for e in data["events"] if e.get("is_current") and not e.get("finished")),
+                  data["events"][0],
+              )
+          deadline = datetime.fromisoformat(event["deadline_time"].replace("Z", "+00:00"))
+          minutes = (deadline - datetime.now(timezone.utc)).total_seconds() / 60.0
+          if minutes < 0 or minutes > 120:
+              mode, should_run = "dry-run", "false"
+          elif minutes <= 60:
+              mode, should_run = "execute", "true"
+          else:
+              mode, should_run = "dry-run", "true"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"mode={mode}\nrun={should_run}\n")
+          print(f"GW {event['id']} minutes_to_deadline={minutes:.1f} mode={mode} run={should_run}")
+          PY
+
+      - name: Run FPL Agent
+        if: steps.mode.outputs.run == 'true'
+        env:
+          FPL_EMAIL: ${{ secrets.FPL_EMAIL }}
+          FPL_PASSWORD: ${{ secrets.FPL_PASSWORD }}
+          FPL_TEAM_ID: ${{ secrets.FPL_TEAM_ID }}
+        run: |
+          python main.py --mode ${{ steps.mode.outputs.mode }}
+
+      - name: Publish report summary
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          if [ -f REPORT.md ]; then
+            cat REPORT.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit Report & State Snapshot
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          git config --global user.name "FPL AI Agent"
+          git config --global user.email "bot@fpl-agent.ai"
+          git add REPORT.md data/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "update: GW decision report & state [skip ci]" && git push)

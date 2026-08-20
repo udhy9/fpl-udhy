@@ -1,0 +1,68 @@
+import argparse
+import json
+import os
+from fpl_api import FPLClient
+from analyzer import FPLAnalyzer
+from optimizer import FPLOptimizer
+from reporter import FPLReporter
+
+
+def run(mode="dry-run"):
+    client = FPLClient()
+    client.login()
+
+    bootstrap = client.get_bootstrap_data()
+    event = client.get_current_event()
+    gw = event["id"]
+
+    my_team = client.get_my_team()
+    prev_snapshot = client.load_previous_snapshot(gw)
+    manual_transfers = client.detect_manual_transfers(my_team, prev_snapshot)
+
+    with open("manager_override.json", "r") as f:
+        overrides = json.load(f)
+
+    analyzer = FPLAnalyzer(bootstrap)
+    optimizer = FPLOptimizer(analyzer, my_team, bootstrap, overrides, manual_locks=manual_transfers)
+    plan = optimizer.optimize()
+
+    is_dry_run = (mode == "dry-run")
+    report_md = FPLReporter.generate_report(gw, plan, analyzer.elements, manual_transfers, is_dry_run)
+
+    with open("REPORT.md", "w") as f:
+        f.write(report_md)
+
+    if not is_dry_run:
+        snapshot_path = f"data/gw{gw}_snapshot.json"
+        if os.path.exists(snapshot_path):
+            print(f"GW {gw} already executed (snapshot exists). Skipping submit.")
+            return
+
+        # Build lineup picks payload
+        picks = []
+        for i, pid in enumerate(plan["starting_xi"], 1):
+            picks.append({
+                "element": pid,
+                "position": i,
+                "is_captain": (pid == plan["captain"]),
+                "is_vice_captain": (pid == plan["vice_captain"])
+            })
+        for i, pid in enumerate(plan["bench"], 12):
+            picks.append({
+                "element": pid,
+                "position": i,
+                "is_captain": False,
+                "is_vice_captain": False
+            })
+        client.submit_lineup(picks)
+        client.save_state_snapshot(gw, my_team)
+        print(f"Successfully submitted GW {gw} lineup to FPL.")
+    else:
+        print(f"GW {gw} dry-run report generated in REPORT.md.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["dry-run", "execute"], default="dry-run")
+    args = parser.parse_args()
+    run(mode=args.mode)

@@ -19,7 +19,7 @@ class FPLClient:
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Origin": "https://fantasy.premierleague.com",
             "Referer": "https://fantasy.premierleague.com/",
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
         })
 
         if self.cookie:
@@ -84,6 +84,18 @@ class FPLClient:
         except Exception as exc:
             print(f"Auth check failed: {exc}")
             return False
+
+    @staticmethod
+    def _safe_json(res):
+        if res.status_code in (204,):
+            return {"status": "success", "status_code": res.status_code}
+        text = (res.text or "").strip()
+        if not text:
+            return {"status": "success", "status_code": res.status_code}
+        try:
+            return res.json()
+        except ValueError:
+            return {"status": "success", "status_code": res.status_code, "raw": text[:200]}
 
     def persist_rotated_refresh_token(self, path="rotated_refresh_token.txt"):
         return False
@@ -196,7 +208,7 @@ class FPLClient:
         }
         res = self.session.post(f"{self.BASE_URL}/transfers/", json=payload, timeout=30)
         res.raise_for_status()
-        return res.json()
+        return self._safe_json(res)
 
     def submit_lineup(self, picks_payload):
         payload = {"picks": picks_payload, "chip": None}
@@ -204,7 +216,7 @@ class FPLClient:
             f"{self.BASE_URL}/my-team/{self.team_id}/", json=payload, timeout=30
         )
         res.raise_for_status()
-        return res.json()
+        return self._safe_json(res)
 
     def get_current_event(self):
         data = self.get_bootstrap_data()

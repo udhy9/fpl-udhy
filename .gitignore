@@ -5,3 +5,4 @@ venv/
 .env
 .DS_Store
 rotated_refresh_token.txt
+.fpl_token_cache

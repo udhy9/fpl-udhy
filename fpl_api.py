@@ -9,18 +9,25 @@ import requests
 class FPLClient:
     LOGIN_URL = "https://users.premierleague.com/accounts/login/"
     BASE_URL = "https://fantasy.premierleague.com/api"
-    OIDC_CLIENT_ID = os.environ.get(
-        "FPL_OIDC_CLIENT_ID", "bfcbaf69-aade-4c1b-8f00-c1cb8a193030"
-    )
-    TOKEN_URL = os.environ.get(
-        "FPL_TOKEN_URL", "https://account.premierleague.com/as/token"
-    )
+    TOKEN_CACHE_PATH = ".fpl_token_cache"
+    OIDC_CLIENT_IDS = [
+        os.environ.get("FPL_OIDC_CLIENT_ID", "bfcbaf69-aade-4c1b-8f00-c1cb8a193030"),
+        "1f243d70-a140-4035-8c41-341f5af5aa12",
+    ]
+    TOKEN_URLS = [
+        os.environ.get("FPL_TOKEN_URL", "https://account.premierleague.com/as/token.oauth2"),
+        "https://account.premierleague.com/as/token",
+    ]
 
     def __init__(self, email=None, password=None, team_id=None, refresh_token=None, cookie=None):
         self.email = email or os.environ.get("FPL_EMAIL")
         self.password = password or os.environ.get("FPL_PASSWORD")
         self.team_id = team_id or os.environ.get("FPL_TEAM_ID")
-        self.refresh_token = refresh_token or os.environ.get("FPL_REFRESH_TOKEN")
+        self.refresh_token = (
+            refresh_token
+            or os.environ.get("FPL_REFRESH_TOKEN")
+            or self._load_token_cache()
+        )
         self.cookie = cookie or os.environ.get("FPL_COOKIE") or os.environ.get("pl_profile")
         self.access_token = None
         self.rotated_refresh_token = None
@@ -60,18 +67,113 @@ class FPLClient:
 
     def _apply_access_token(self, access_token):
         self.access_token = access_token
+        self.session.headers["Authorization"] = f"Bearer {access_token}"
         self.session.headers["X-API-Authorization"] = f"Bearer {access_token}"
+
+    @classmethod
+    def _load_token_cache(cls):
+        if not os.path.exists(cls.TOKEN_CACHE_PATH):
+            return None
+        try:
+            with open(cls.TOKEN_CACHE_PATH, "r") as f:
+                data = json.load(f)
+            return data.get("refresh_token")
+        except Exception:
+            with open(cls.TOKEN_CACHE_PATH, "r") as f:
+                return f.read().strip() or None
+
+    def _save_token_cache(self, refresh_token):
+        if not refresh_token:
+            return
+        with open(self.TOKEN_CACHE_PATH, "w") as f:
+            json.dump({"refresh_token": refresh_token}, f)
+        with open("rotated_refresh_token.txt", "w") as f:
+            f.write(refresh_token)
+
+    def exchange_refresh_token(self, refresh_token=None):
+        refresh = self._parse_oidc_blob(refresh_token or self.refresh_token)["refresh_token"]
+        if not refresh:
+            print("No refresh token found.")
+            return False
+
+        last_error = None
+        client_ids = list(dict.fromkeys(self.OIDC_CLIENT_IDS))
+        blob_client = self._parse_oidc_blob(refresh_token or self.refresh_token)["client_id"]
+        if blob_client:
+            client_ids.insert(0, blob_client)
+
+        for token_url in self.TOKEN_URLS:
+            for client_id in client_ids:
+                print(f"Exchanging FPL refresh token (length={len(refresh)}) via {token_url} client_id={client_id}.")
+                res = requests.post(
+                    token_url,
+                    data={
+                        "grant_type": "refresh_token",
+                        "client_id": client_id,
+                        "refresh_token": refresh,
+                    },
+                    headers={
+                        "User-Agent": self.session.headers.get("User-Agent"),
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "application/json",
+                        "accept-language": "en",
+                    },
+                    timeout=30,
+                )
+                if res.status_code != 200:
+                    last_error = f"{res.status_code} {res.text[:300]}"
+                    print(f"OIDC token exchange failed: {last_error}")
+                    continue
+
+                data = res.json()
+                access_token = data.get("access_token")
+                if not access_token:
+                    last_error = "token endpoint returned no access_token"
+                    continue
+
+                self._apply_access_token(access_token)
+                new_refresh = data.get("refresh_token")
+                if new_refresh and new_refresh != refresh:
+                    self.rotated_refresh_token = new_refresh
+                    self.refresh_token = new_refresh
+                    self._save_token_cache(new_refresh)
+                else:
+                    self.refresh_token = refresh
+                    self._save_token_cache(refresh)
+                print("OIDC token exchange succeeded.")
+                return True
+
+        print(f"OIDC Token exchange failed: {last_error}")
+        return False
 
     def _apply_cookie(self, cookie):
         cookie = cookie.strip().strip('"').strip("'")
-        if "pl_profile=" in cookie or ";" in cookie:
-            for part in cookie.split(";"):
+        if cookie.lower().startswith("bearer "):
+            cookie = cookie[7:].strip()
+
+        # Bare JWT pasted as FPL_COOKIE (access or refresh token).
+        if cookie.startswith("eyJ") and "=" not in cookie.split(".")[0]:
+            parts = cookie.split(".")
+            if len(parts) >= 2:
+                self._apply_access_token(cookie)
+                self.refresh_token = self.refresh_token or cookie
+                return
+
+        pairs = cookie.split(";") if ("=" in cookie) else []
+        if pairs:
+            for part in pairs:
                 part = part.strip()
                 if not part or "=" not in part:
                     continue
                 name, value = part.split("=", 1)
-                self.session.cookies.set(name.strip(), value.strip(), domain=".premierleague.com")
+                name, value = name.strip(), value.strip()
+                self.session.cookies.set(name, value, domain=".premierleague.com")
+                if name == "access_token":
+                    self._apply_access_token(value)
+                elif name == "refresh_token" and not self.refresh_token:
+                    self.refresh_token = value
             return
+
         self.session.cookies.set("pl_profile", cookie, domain=".premierleague.com")
 
     def _session_is_authenticated(self):
@@ -84,7 +186,6 @@ class FPLClient:
         blob = self._parse_oidc_blob(self.refresh_token)
         refresh = blob["refresh_token"]
         access = blob["access_token"]
-        client_id = blob["client_id"] or self.OIDC_CLIENT_ID
         expires_at = blob["expires_at"]
 
         if access and expires_at:
@@ -103,49 +204,17 @@ class FPLClient:
 
         if not refresh:
             return False
-        print(f"FPL refresh token loaded (length={len(refresh)}, client_id={client_id}).")
-
-        res = requests.post(
-            self.TOKEN_URL,
-            data={
-                "grant_type": "refresh_token",
-                "client_id": client_id,
-                "refresh_token": refresh,
-            },
-            headers={
-                "User-Agent": self.session.headers.get("User-Agent"),
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "application/json",
-                "accept-language": "en",
-            },
-            timeout=30,
-        )
-        if res.status_code >= 400:
-            detail = res.text[:300]
-            try:
-                payload = res.json()
-                detail = payload.get("error_description") or payload.get("error") or detail
-            except Exception:
-                pass
-            raise RuntimeError(
-                f"FPL OIDC login failed ({res.status_code}): {detail}. "
-                "Set FPL_COOKIE (pl_profile from DevTools) or copy a fresh refresh token "
-                "after closing every FPL tab."
-            )
-
-        token_data = res.json()
-        self.access_token = token_data.get("access_token")
-        if not self.access_token:
-            raise RuntimeError("FPL token endpoint did not return an access token.")
-
-        self._apply_access_token(self.access_token)
-        new_refresh = token_data.get("refresh_token")
-        if new_refresh and new_refresh != refresh:
-            self.rotated_refresh_token = new_refresh
-            self.refresh_token = new_refresh
-        return True
+        return self.exchange_refresh_token(refresh)
 
     def login(self):
+        if self.access_token:
+            try:
+                if self._session_is_authenticated():
+                    print("Authenticated via access_token cookie.")
+                    return True
+            except Exception as exc:
+                print(f"access_token session check failed: {exc}")
+
         if self.cookie:
             try:
                 if self._session_is_authenticated():
@@ -181,10 +250,12 @@ class FPLClient:
         return False
 
     def persist_rotated_refresh_token(self, path="rotated_refresh_token.txt"):
-        if not self.rotated_refresh_token:
+        token = self.rotated_refresh_token or self.refresh_token
+        if not token:
             return False
+        self._save_token_cache(token)
         with open(path, "w") as f:
-            f.write(self.rotated_refresh_token)
+            f.write(token)
         return True
 
     def get_bootstrap_data(self):

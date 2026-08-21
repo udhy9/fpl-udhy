@@ -17,6 +17,9 @@ class FPLAnalyzer:
         self.fixture_horizon = 5
         self.fixture_multipliers = {}
         self.historical_points = {}
+        self.overall_rank = None
+        self.SET1_LAST_GW = 19
+        self.SET2_FIRST_GW = 20
 
     @staticmethod
     def _num(value, default=0.0):
@@ -95,9 +98,67 @@ class FPLAnalyzer:
         return self._num(player.get("points_per_game"))
 
     def decay_hist_weight(self, gw=None):
-        """50% historical prior at GW1, linear decay to 0 by GW6."""
+        """50% historical prior at GW1, linear decay through GW5 (0 by GW6)."""
         gw = int(gw or self.current_gw or 1)
         return max(0.0, 0.50 - (max(0, gw - 1) * 0.10))
+
+    def chip_half_label(self, gw=None):
+        gw = int(gw or self.current_gw or 1)
+        if gw <= self.SET1_LAST_GW:
+            return "Set 1 (expires GW19)"
+        return "Set 2 (GW20–38)"
+
+    def chips_in_window(self, chips, gw=None):
+        gw = int(gw or self.current_gw or 1)
+        window = []
+        for chip in chips or []:
+            start = int(chip.get("start_event") or 1)
+            stop = int(chip.get("stop_event") or 38)
+            if start <= gw <= stop:
+                window.append(chip)
+        return window
+
+    def available_chip_names(self, chips, gw=None):
+        names = set()
+        for chip in self.chips_in_window(chips, gw):
+            if chip.get("status_for_entry") == "available" and chip.get("name"):
+                names.add(chip["name"])
+        return names
+
+    def xp_per_million(self, player_id):
+        """Budget value efficiency: projected xP per £1.0m."""
+        player = self.elements.get(player_id)
+        if not player:
+            return 0.0
+        cost = max(0.1, self._num(player.get("now_cost")) / 10.0)
+        return round(self.calculate_xp(player_id) / cost, 3)
+
+    def _ownership_bonus(self, selected_by, pos):
+        """Rank-aware template posture: protect high rank, chase with differentials."""
+        rank = self.overall_rank
+        if rank is not None and rank < 100000:
+            bonus = 1.0 + min(0.25, (selected_by / 100.0) * 0.6)
+        elif rank is not None and rank > 500000:
+            bonus = 1.0 + min(0.10, (selected_by / 100.0) * 0.2)
+        else:
+            bonus = 1.0 + min(0.20, (selected_by / 100.0) * 0.5)
+        if pos == 2 and selected_by >= 10.0 and (rank is None or rank <= 500000):
+            bonus += 0.05
+        return bonus
+
+    def _momentum_multiplier(self, player, form, xgi):
+        """Penalize chronic flops; boost breakout xGI90 + form from GW4 onward."""
+        gw = self.current_gw or 1
+        if gw < 4:
+            return 1.0
+        minutes = int(self._num(player.get("minutes")))
+        total_pts = int(self._num(player.get("total_points")))
+        xgi90 = (xgi / (minutes / 90.0)) if minutes >= 180 else 0.0
+        if minutes > 240 and total_pts < 8 and xgi < 0.5:
+            return 0.70
+        if form >= 5.0 and xgi90 >= 0.50:
+            return 1.25
+        return 1.0
 
     def load_historical_priors(self):
         """Load previous-season totals (Vaastav FPL dataset) keyed to current player IDs."""
@@ -186,8 +247,11 @@ class FPLAnalyzer:
                 count += 1
         return count if self.fixtures else 1
 
-    def evaluate_chip_triggers(self, current_gw, squad_ids, fixture_multipliers=None):
-        """Recommend Wildcard / Free Hit / Bench Boost / Triple Captain. Does not force Wildcard."""
+    def evaluate_chip_triggers(self, current_gw, squad_ids, fixture_multipliers=None, chips=None):
+        return self.evaluate_chip_strategy(current_gw, squad_ids, fixture_multipliers, chips=chips)
+
+    def evaluate_chip_strategy(self, current_gw, squad_ids, fixture_multipliers=None, used_chips=None, chips=None):
+        """8-chip windows: Set 1 expires at GW19; Set 2 unlocks from GW20. Does not force Wildcard."""
         multipliers = fixture_multipliers if fixture_multipliers is not None else self.fixture_multipliers
         injured_starters = 0
         dgw_players = 0
@@ -221,12 +285,31 @@ class FPLAnalyzer:
             recommendation = "3xc"
             reason = f"Premium DGW xP {best_dgw_xp:.1f} — Triple Captain is live."
 
+        available = self.available_chip_names(chips, current_gw)
+        if used_chips:
+            available -= {str(name).lower() for name in used_chips}
+
+        is_first_half = current_gw <= self.SET1_LAST_GW
+        urgency_note = ""
+        if is_first_half and current_gw >= 16 and available:
+            unused = ", ".join(sorted(available))
+            urgency_note = f"Set 1 chips still unused ({unused}) expire at the GW19 deadline."
+            if "wildcard" in available:
+                recommendation = "wildcard"
+                reason = urgency_note
+            elif recommendation is None and "3xc" in available and dgw_players >= 1:
+                recommendation = "3xc"
+                reason = "Set 1 Triple Captain expires at GW19 and a DGW captain target exists."
+
         stats = {
             "injured_starters": injured_starters,
             "dgw_players": dgw_players,
             "bgw_players": bgw_players,
             "best_dgw_xp": best_dgw_xp,
             "reason": reason,
+            "half": self.chip_half_label(current_gw),
+            "urgency_note": urgency_note,
+            "available_this_half": sorted(available),
         }
         return recommendation, stats
 
@@ -336,10 +419,9 @@ class FPLAnalyzer:
             team_strength = ((def_home + def_away) / 2.0) / 1100.0
         else:
             team_strength = ((home_str + away_str) / 2.0) / 1100.0
-        ownership_weight = 1.0 + min(0.20, (selected_by / 100.0) * 0.5)
-        if pos == 2 and selected_by >= 10.0:
-            ownership_weight += 0.05
-        return max(0.0, blended_base * xmins_factor * team_strength * ownership_weight)
+        ownership_weight = self._ownership_bonus(selected_by, pos)
+        momentum_mult = self._momentum_multiplier(player, form, xgi)
+        return max(0.0, blended_base * xmins_factor * team_strength * ownership_weight * momentum_mult)
 
     def horizon_xp(self, player_id, weeks=3):
         """Sum of next N single-GW xP estimates using that week's FDR."""
@@ -355,11 +437,13 @@ class FPLAnalyzer:
             )
         return round(total, 2)
 
-    def calculate_xp(self, player_id, current_gw=None, fixture_multipliers=None):
+    def calculate_xp(self, player_id, current_gw=None, fixture_multipliers=None, overall_rank=None):
         if current_gw is not None:
             self.current_gw = int(current_gw)
         if fixture_multipliers is not None:
             self.fixture_multipliers = fixture_multipliers
+        if overall_rank is not None:
+            self.overall_rank = overall_rank
         player = self.elements.get(player_id)
         base = self._unfdr_xp(player_id)
         if base == 0.0 or not player:
@@ -735,7 +819,7 @@ TACTICAL OBJECTIVES:
 2. STARTER INTEGRITY & ANTI-CANNIBALIZATION: 11 nailed 90-min starters. Never start fringe/youth (Lucky, Ramsay). Never start 3 defenders against our own starting striker.
 3. PRESS CONFERENCE: use each player's news/status/chance_of_playing. Bench anyone the presser suggests is rotated, doubtful, or ruled out.
 4. FREE TRANSFER STRATEGY: only spend a transfer if a starter is long-term injured / ~0 xMins, or the move is clearly +EV. Otherwise set bank_transfer_recommendation=true to accumulate 2-5 FTs.
-5. CHIP STRATEGY: respect the automated recommendation `{baseline_plan.get("chip_recommendation")}` ({(baseline_plan.get("chip_meta") or {}).get("reason")}). Only play Triple Captain / Bench Boost this week if that recommendation is 3xc or bboost. Do not activate Wildcard.
+5. CHIP STRATEGY: 8-chip system (2x WC/FH/TC/BB). Set 1 expires at GW19; Set 2 unlocks GW20. Respect `{baseline_plan.get("chip_recommendation")}` ({(baseline_plan.get("chip_meta") or {}).get("reason")}). Only play Triple Captain / Bench Boost this week if that recommendation is 3xc or bboost. Do not activate Wildcard unless allow_auto_chips.
 6. BENCH SAFETY: GK first, healthy nailed 1st outfield sub, injured/doubtful last.
 7. Respect overrides: {json.dumps(overrides)}
 8. Use only the 15 squad IDs. Formation: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.

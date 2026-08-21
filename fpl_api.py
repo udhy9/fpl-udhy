@@ -236,6 +236,18 @@ class FPLClient:
         res.raise_for_status()
         return res.json()
 
+    def get_overall_rank(self):
+        if not self.team_id:
+            return None
+        try:
+            res = self.session.get(f"{self.BASE_URL}/entry/{self.team_id}/", timeout=30)
+            if res.status_code != 200:
+                return None
+            data = res.json() or {}
+            return data.get("summary_overall_rank") or data.get("summary_event_rank")
+        except Exception:
+            return None
+
     def _public_team(self, current_gw):
         if not self.team_id:
             return None

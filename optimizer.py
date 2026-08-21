@@ -7,7 +7,7 @@ class FPLOptimizer:
     FT_BANK_CAP = 5
     HORIZON_WEEKS = 3
     GAIN_THRESHOLD = 2.0
-    def __init__(self, analyzer, my_team_data, bootstrap_data, overrides, manual_locks=None, gameweek=1, current_gw=None):
+    def __init__(self, analyzer, my_team_data, bootstrap_data, overrides, manual_locks=None, gameweek=1, current_gw=None, overall_rank=None):
         self.analyzer = analyzer
         self.my_team_data = my_team_data
         self.elements = analyzer.elements
@@ -15,13 +15,29 @@ class FPLOptimizer:
         self.manual_locks = manual_locks or []
         self.gameweek = int(current_gw or gameweek or 1)
         self.current_gw = self.gameweek
+        self.overall_rank = overall_rank if overall_rank is not None else analyzer.overall_rank
+        if self.overall_rank is not None:
+            self.analyzer.overall_rank = self.overall_rank
         self.current_picks = [p["element"] for p in my_team_data.get("picks", [])]
         self.selling_price = {
-            p["element"]: p.get("selling_price") or self.elements[p["element"]]["now_cost"]
+            p["element"]: self.calculate_selling_price(p)
             for p in my_team_data.get("picks", [])
         }
         self.bank = my_team_data.get("transfers", {}).get("bank", 0)
         self.free_transfers = my_team_data.get("transfers", {}).get("limit", 1)
+
+    def calculate_selling_price(self, pick_item):
+        """True FPL sell value: 50% profit tax (rounded down in tenths of a million)."""
+        pid = pick_item["element"]
+        now = int(self.elements[pid]["now_cost"])
+        purchase = pick_item.get("purchase_price")
+        api_sell = pick_item.get("selling_price")
+        if purchase is None:
+            return int(api_sell if api_sell is not None else now)
+        purchase = int(purchase)
+        if now <= purchase:
+            return now
+        return purchase + (now - purchase) // 2
 
     def _max_transfers(self):
         if not self.overrides.get("allow_transfers", True):
@@ -41,11 +57,7 @@ class FPLOptimizer:
         return any(n.lower() in name for n in names if n)
 
     def _available_chips(self):
-        names = set()
-        for chip in self.my_team_data.get("chips") or []:
-            if chip.get("status_for_entry") == "available" and chip.get("name"):
-                names.add(chip["name"])
-        return names
+        return self.analyzer.available_chip_names(self.my_team_data.get("chips") or [], self.gameweek)
 
     def _chip_to_play(self, recommendation):
         if self.gameweek == 1 or not recommendation:
@@ -82,10 +94,17 @@ class FPLOptimizer:
             pid: self.selling_price[pid] if pid in current else self.elements[pid]["now_cost"]
             for pid in candidates
         }
+        value_bonus = {}
+        for pid in candidates:
+            if pid not in current and cost[pid] <= 55 and xp[pid] > 0:
+                vpm = xp[pid] / max(cost[pid] / 10.0, 0.1)
+                value_bonus[pid] = min(0.8, vpm * 0.08)
+            else:
+                value_bonus[pid] = 0.0
 
         prob = pulp.LpProblem("FPL_Squad", pulp.LpMaximize)
         take = {pid: pulp.LpVariable(f"squad_{pid}", cat=pulp.LpBinary) for pid in candidates}
-        prob += pulp.lpSum([take[pid] * xp[pid] for pid in candidates])
+        prob += pulp.lpSum([take[pid] * (xp[pid] + value_bonus[pid]) for pid in candidates])
         prob += pulp.lpSum([take[pid] for pid in candidates]) == 15
         prob += pulp.lpSum([take[pid] * cost[pid] for pid in candidates]) <= budget
 
@@ -347,8 +366,8 @@ class FPLOptimizer:
 
         squad_ids = list(starting_xi) + list(ordered_bench)
         fixture_mults = self.analyzer.fixture_multipliers or self.analyzer.get_fixture_multipliers(self.current_gw)
-        chip_rec, chip_meta = self.analyzer.evaluate_chip_triggers(
-            self.current_gw, squad_ids, fixture_mults
+        chip_rec, chip_meta = self.analyzer.evaluate_chip_strategy(
+            self.current_gw, squad_ids, fixture_mults, chips=self.my_team_data.get("chips")
         )
         chip_to_play = self._chip_to_play(chip_rec)
         if chip_to_play == "3xc":
@@ -379,4 +398,8 @@ class FPLOptimizer:
             "ft_available": max(0, int(self.free_transfers or 0)),
             "bank_transfer": bank_transfer,
             "transfer_strategy": transfer_strategy,
+            "overall_rank": self.overall_rank,
+            "liquidated_bank": self.bank,
+            "squad_sell_value": sum(self.selling_price.values()),
+            "liquidated_budget": self.bank + sum(self.selling_price.values()),
         }

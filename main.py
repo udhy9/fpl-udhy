@@ -35,11 +35,20 @@ def run(mode="dry-run"):
     with open("manager_override.json", "r") as f:
         overrides = json.load(f)
 
+    overall_rank = client.get_overall_rank()
     analyzer = FPLAnalyzer(bootstrap)
+    analyzer.overall_rank = overall_rank
     analyzer.load_fixture_horizon(gw)
     analyzer.load_historical_priors()
     optimizer = FPLOptimizer(
-        analyzer, my_team, bootstrap, overrides, manual_locks=manual_transfers, gameweek=gw, current_gw=gw
+        analyzer,
+        my_team,
+        bootstrap,
+        overrides,
+        manual_locks=manual_transfers,
+        gameweek=gw,
+        current_gw=gw,
+        overall_rank=overall_rank,
     )
     plan = optimizer.optimize()
 

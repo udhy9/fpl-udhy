@@ -1,13 +1,15 @@
 import json
 import os
 import re
+from datetime import datetime
+
 import requests
 
 
 class FPLClient:
     BASE_URL = "https://fantasy.premierleague.com/api"
     OIDC_CLIENT_ID = os.environ.get(
-        "FPL_OIDC_CLIENT_ID", "1f243d70-a140-4035-8c41-341f5af5aa12"
+        "FPL_OIDC_CLIENT_ID", "bfcbaf69-aade-4c1b-8f00-c1cb8a193030"
     )
     TOKEN_URL = os.environ.get(
         "FPL_TOKEN_URL", "https://account.premierleague.com/as/token"
@@ -29,39 +31,72 @@ class FPLClient:
         })
 
     @staticmethod
-    def _extract_refresh_token(raw):
+    def _parse_oidc_blob(raw):
+        parsed = {
+            "refresh_token": None,
+            "access_token": None,
+            "expires_at": None,
+            "client_id": None,
+        }
         if not raw:
-            return None
+            return parsed
         raw = raw.strip().lstrip("\ufeff").strip().strip('"').strip("'")
         if raw.lower().startswith("bearer "):
             raw = raw[7:].strip().strip('"').strip("'")
         if raw.startswith("{"):
             data = json.loads(raw)
-            return data.get("refresh_token") or data.get("refreshToken")
+            parsed["refresh_token"] = data.get("refresh_token") or data.get("refreshToken")
+            parsed["access_token"] = data.get("access_token") or data.get("accessToken")
+            parsed["expires_at"] = data.get("expires_at") or data.get("expiresAt")
+            parsed["client_id"] = data.get("client_id")
+            return parsed
         match = re.search(r'refresh_token["\']?\s*[:=]\s*["\']([^"\']+)["\']', raw)
-        if match:
-            return match.group(1)
-        return raw
+        parsed["refresh_token"] = match.group(1) if match else raw
+        return parsed
+
+    def _apply_access_token(self, access_token):
+        self.access_token = access_token
+        self.session.headers["X-API-Authorization"] = f"Bearer {access_token}"
 
     def login(self):
-        refresh = self._extract_refresh_token(self.refresh_token)
+        blob = self._parse_oidc_blob(self.refresh_token)
+        refresh = blob["refresh_token"]
+        access = blob["access_token"]
+        client_id = blob["client_id"] or self.OIDC_CLIENT_ID
+        expires_at = blob["expires_at"]
+
+        if access and expires_at:
+            try:
+                if float(expires_at) > (datetime.now().timestamp() + 60):
+                    print("Using unexpired FPL access token from oidc.user blob.")
+                    self._apply_access_token(access)
+                    self.refresh_token = refresh
+                    return True
+            except (TypeError, ValueError):
+                pass
+        elif access and not refresh:
+            print("Using FPL access token from oidc.user blob.")
+            self._apply_access_token(access)
+            return True
+
         if not refresh:
             raise ValueError(
-                "FPL_REFRESH_TOKEN is missing. FPL no longer accepts email/password "
-                "login from GitHub Actions. Copy the oidc.user refresh token from "
-                "fantasy.premierleague.com DevTools and store it as a GitHub secret."
+                "FPL_REFRESH_TOKEN is missing. Copy the oidc.user refresh_token "
+                "(or the whole oidc.user JSON) from fantasy.premierleague.com DevTools."
             )
-        print(f"FPL refresh token loaded (length={len(refresh)}).")
+        print(f"FPL refresh token loaded (length={len(refresh)}, client_id={client_id}).")
 
-        res = self.session.post(
+        res = requests.post(
             self.TOKEN_URL,
             data={
                 "grant_type": "refresh_token",
-                "client_id": self.OIDC_CLIENT_ID,
+                "client_id": client_id,
                 "refresh_token": refresh,
             },
             headers={
-                "content-type": "application/x-www-form-urlencoded",
+                "User-Agent": self.session.headers.get("User-Agent"),
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
                 "accept-language": "en",
             },
             timeout=30,
@@ -75,8 +110,8 @@ class FPLClient:
                 pass
             raise RuntimeError(
                 f"FPL OIDC login failed ({res.status_code}): {detail}. "
-                "Copy a fresh refresh token from fantasy.premierleague.com and update "
-                "the FPL_REFRESH_TOKEN secret."
+                "Close every FPL tab, copy a fresh token immediately, paste the secret, "
+                "then run the workflow before reopening fantasy.premierleague.com."
             )
 
         token_data = res.json()
@@ -84,7 +119,7 @@ class FPLClient:
         if not self.access_token:
             raise RuntimeError("FPL token endpoint did not return an access token.")
 
-        self.session.headers["X-API-Authorization"] = f"Bearer {self.access_token}"
+        self._apply_access_token(self.access_token)
         new_refresh = token_data.get("refresh_token")
         if new_refresh and new_refresh != refresh:
             self.rotated_refresh_token = new_refresh

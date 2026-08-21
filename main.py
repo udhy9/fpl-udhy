@@ -10,6 +10,7 @@ from reporter import FPLReporter
 def run(mode="dry-run"):
     client = FPLClient()
     client.login()
+    client.persist_rotated_refresh_token()
 
     bootstrap = client.get_bootstrap_data()
     event = client.get_current_event()

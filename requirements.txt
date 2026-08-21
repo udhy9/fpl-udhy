@@ -2,3 +2,4 @@ playwright>=1.40.0
 pulp>=2.8.0
 python-dateutil>=2.9.0
 requests>=2.31.0
+google-genai>=1.0.0

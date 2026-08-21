@@ -39,9 +39,17 @@ def run(mode="dry-run"):
     )
     plan = optimizer.optimize()
 
+    squad_ids = [p["element"] for p in my_team.get("picks", [])]
+    if plan.get("starting_xi"):
+        squad_ids = plan["starting_xi"] + plan["bench"]
+    plan, tactical_reasoning = analyzer.run_llm_tactical_review(
+        plan, squad_ids, overrides, gameweek=gw
+    )
+
     report_md = FPLReporter.generate_report(
         gw, plan, analyzer.elements, manual_transfers, is_dry_run, teams=analyzer.teams
     )
+    report_md += f"\n\n### 🧠 Tactical AI Analysis\n{tactical_reasoning}\n"
 
     with open("REPORT.md", "w") as f:
         f.write(report_md)

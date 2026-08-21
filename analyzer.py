@@ -70,8 +70,80 @@ class FPLAnalyzer:
         starts = int(self._num(player.get("starts")))
         minutes = int(self._num(player.get("minutes")))
         minutes_factor = 1.0 if minutes > 180 or starts >= 2 else 0.75
+        if pos == 1 and not self.is_likely_starting_gk(player_id):
+            minutes_factor *= 0.15
 
         return round(max(0.0, base_score * avail * team_strength * minutes_factor), 2)
+
+    def playing_chance(self, player_id):
+        player = self.elements.get(player_id) or {}
+        chance = player.get("chance_of_playing_next_round")
+        if chance is not None:
+            return int(chance)
+        if player.get("status") in ("i", "s", "u"):
+            return 0
+        if player.get("status") == "d":
+            return 50
+        return 100
+
+    def is_unavailable(self, player_id):
+        player = self.elements.get(player_id) or {}
+        return player.get("status") in ("i", "s", "u") or self.playing_chance(player_id) == 0
+
+    def should_not_start(self, player_id):
+        player = self.elements.get(player_id) or {}
+        if player.get("status") in ("i", "s", "u"):
+            return True
+        chance = player.get("chance_of_playing_next_round")
+        if chance is not None and chance <= 50:
+            return True
+        return player.get("status") == "d"
+
+    def is_likely_starting_gk(self, player_id):
+        player = self.elements.get(player_id)
+        if not player or player.get("element_type") != 1:
+            return False
+        team_gks = [
+            gk for gk in self.elements.values()
+            if gk.get("element_type") == 1 and gk.get("team") == player["team"]
+        ]
+
+        def gk_key(gk):
+            unavailable = 1 if gk.get("status") in ("i", "s", "u") else 0
+            chance = gk.get("chance_of_playing_next_round")
+            if chance is None:
+                chance = 0 if unavailable else 100
+            return (
+                -unavailable,
+                int(chance),
+                self._num(gk.get("ep_next")),
+                self._num(gk.get("selected_by_percent")),
+                int(gk.get("now_cost") or 0),
+                int(gk.get("minutes") or 0),
+            )
+
+        starter = max(team_gks, key=gk_key)
+        return starter["id"] == player_id
+
+    def sub_priority(self, player_id, xp=0.0):
+        """Higher value = earlier outfield bench slot (first auto-sub)."""
+        player = self.elements.get(player_id) or {}
+        if player.get("status") in ("i", "s", "u"):
+            return -100.0
+        chance = player.get("chance_of_playing_next_round")
+        if (chance is not None and chance <= 50) or player.get("status") == "d":
+            return -50.0 + float(xp or 0.0)
+        return float(xp or 0.0)
+
+    def order_bench(self, bench, squad_xp):
+        bench_gk = [pid for pid in bench if self._pos(pid) == 1]
+        bench_gk.sort(key=lambda pid: -float(squad_xp.get(pid) or 0.0))
+        bench_outfield = [pid for pid in bench if self._pos(pid) != 1]
+        bench_outfield.sort(
+            key=lambda pid: self.sub_priority(pid, squad_xp.get(pid, 0.0)),
+            reverse=True,
+        )
+        return bench_gk + bench_outfield
 
     def load_fixtures(self, gameweek):
         try:
@@ -181,10 +253,7 @@ class FPLAnalyzer:
             )
 
         starting.sort(key=lambda pid: (self._pos(pid), -xp.get(pid, 0)))
-        bench_gk = [pid for pid in bench if self._pos(pid) == 1]
-        bench_out = [pid for pid in bench if self._pos(pid) != 1]
-        bench_out.sort(key=lambda pid: -xp.get(pid, 0))
-        bench = bench_gk + bench_out
+        bench = self.order_bench(bench, xp)
 
         if not self._formation_ok(starting):
             return plan, "Heuristic tactics skipped (would break formation)."
@@ -298,8 +367,14 @@ Return ONLY JSON:
                         last_error = "Gemini returned an invalid XI/bench."
                         continue
                     merged = dict(baseline_plan)
-                    merged["starting_xi"] = [int(pid) for pid in tactical_result["starting_xi"]]
-                    merged["bench"] = [int(pid) for pid in tactical_result["bench"]]
+                    merged["starting_xi"] = sorted(
+                        [int(pid) for pid in tactical_result["starting_xi"]],
+                        key=lambda pid: self._pos(pid),
+                    )
+                    merged["bench"] = self.order_bench(
+                        [int(pid) for pid in tactical_result["bench"]],
+                        merged["squad_xp"],
+                    )
                     merged["captain"] = int(tactical_result["captain"])
                     merged["vice_captain"] = int(tactical_result["vice_captain"])
                     reasoning = tactical_result.get("tactical_reasoning") or "Gemini tactical review applied."

@@ -88,11 +88,8 @@ def run(mode="dry-run"):
                 f"Cannot submit lineup; planned players are not in the live squad: {missing_squad}"
             )
 
-        pos = {pid: analyzer.elements[pid]["element_type"] for pid in planned_squad}
-        starting_xi = sorted(plan["starting_xi"], key=lambda pid: pos[pid])
-        bench_gk = [pid for pid in plan["bench"] if pos[pid] == 1]
-        bench_out = [pid for pid in plan["bench"] if pos[pid] != 1]
-        bench = bench_gk + bench_out
+        starting_xi = sorted(plan["starting_xi"], key=lambda pid: analyzer.elements[pid]["element_type"])
+        bench = analyzer.order_bench(plan["bench"], plan["squad_xp"])
 
         picks = []
         for i, pid in enumerate(starting_xi, 1):

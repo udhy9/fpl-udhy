@@ -36,11 +36,23 @@ class FPLOptimizer:
         name = self.elements[pid]["web_name"].lower()
         return any(n.lower() in name for n in names if n)
 
+    def _can_transfer_in(self, player):
+        if player.get("status") in ("u", "i", "s"):
+            return False
+        chance = player.get("chance_of_playing_next_round")
+        if chance is not None and chance <= 50:
+            return False
+        if player.get("status") == "d":
+            return False
+        if player.get("element_type") == 1 and not self.analyzer.is_likely_starting_gk(player["id"]):
+            return False
+        return True
+
     def _optimize_squad(self, max_transfers):
         current = set(self.current_picks)
         candidates = [
             pid for pid, player in self.elements.items()
-            if pid in current or player.get("status") != "u"
+            if pid in current or self._can_transfer_in(player)
         ]
         xp = {pid: self.analyzer.calculate_xp(pid) for pid in candidates}
         budget = self.bank + sum(self.selling_price.get(pid, 0) for pid in current)
@@ -62,10 +74,15 @@ class FPLOptimizer:
         prob += pulp.lpSum([take[pid] for pid in candidates if pos[pid] == 4]) == 3
 
         teams = defaultdict(list)
+        gks_by_team = defaultdict(list)
         for pid in candidates:
             teams[self.elements[pid]["team"]].append(pid)
+            if pos[pid] == 1:
+                gks_by_team[self.elements[pid]["team"]].append(pid)
         for team_pids in teams.values():
             prob += pulp.lpSum([take[pid] for pid in team_pids]) <= 3
+        for team_gks in gks_by_team.values():
+            prob += pulp.lpSum([take[pid] for pid in team_gks]) <= 1
 
         if current:
             prob += pulp.lpSum([take[pid] for pid in current if pid in take]) >= 15 - max_transfers
@@ -74,7 +91,7 @@ class FPLOptimizer:
             pid for pid in current if self._name_matches(pid, self.overrides.get("must_start", []))
         ]
         for pid in must_keep:
-            if pid in take:
+            if pid in take and not self.analyzer.should_not_start(pid):
                 prob += take[pid] == 1
 
         status = prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=30))
@@ -135,25 +152,48 @@ class FPLOptimizer:
 
         for pid in current_squad_ids:
             if self._name_matches(pid, must_start) or pid in self.manual_locks:
-                prob += start_vars[pid] == 1
-            if self._name_matches(pid, must_bench):
-                prob += start_vars[pid] == 0
+                if not self.analyzer.should_not_start(pid):
+                    prob += start_vars[pid] == 1
+            if self._name_matches(pid, must_bench) or self.analyzer.should_not_start(pid):
+                if not (pos_map[pid] == 1 and all(
+                    self.analyzer.should_not_start(gk)
+                    for gk in current_squad_ids if pos_map[gk] == 1
+                )):
+                    prob += start_vars[pid] == 0
 
-        prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        if pulp.LpStatus[status] != "Optimal":
+            print(f"Lineup solver status={pulp.LpStatus[status]}; retrying without injury bench locks.")
+            prob = pulp.LpProblem("FPL_Lineup_Fallback", pulp.LpMaximize)
+            start_vars = {pid: pulp.LpVariable(f"start_{pid}", cat=pulp.LpBinary) for pid in current_squad_ids}
+            prob += pulp.lpSum([start_vars[pid] * squad_xp[pid] for pid in current_squad_ids])
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids]) == 11
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 1]) == 1
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 2]) >= 3
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 2]) <= 5
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 3]) >= 2
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 3]) <= 5
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 4]) >= 1
+            prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 4]) <= 3
+            for pid in current_squad_ids:
+                if self._name_matches(pid, must_start) or pid in self.manual_locks:
+                    prob += start_vars[pid] == 1
+                if self._name_matches(pid, must_bench):
+                    prob += start_vars[pid] == 0
+            prob.solve(pulp.PULP_CBC_CMD(msg=False))
 
         starting_xi = [pid for pid in current_squad_ids if pulp.value(start_vars[pid]) == 1]
         bench = [pid for pid in current_squad_ids if pid not in starting_xi]
 
         starting_xi.sort(key=lambda pid: (pos_map[pid], -squad_xp[pid]))
+        ordered_bench = self.analyzer.order_bench(bench, squad_xp)
 
-        bench_gk = [pid for pid in bench if pos_map[pid] == 1]
-        bench_outfield = [pid for pid in bench if pos_map[pid] != 1]
-        bench_outfield.sort(key=lambda pid: -squad_xp[pid])
-        ordered_bench = bench_gk + bench_outfield
-
-        ranked_starters = sorted(starting_xi, key=lambda pid: -squad_xp[pid])
+        healthy_starters = [
+            pid for pid in starting_xi if not self.analyzer.should_not_start(pid)
+        ] or starting_xi
+        ranked_starters = sorted(healthy_starters, key=lambda pid: -squad_xp[pid])
         cap_id = ranked_starters[0]
-        vc_id = ranked_starters[1]
+        vc_id = ranked_starters[1] if len(ranked_starters) > 1 else ranked_starters[0]
 
         if lock_cap:
             for pid in starting_xi:
@@ -163,6 +203,11 @@ class FPLOptimizer:
         if lock_vc:
             for pid in starting_xi:
                 if lock_vc in self.elements[pid]["web_name"].lower() and pid != cap_id:
+                    vc_id = pid
+                    break
+        if cap_id == vc_id:
+            for pid in sorted(starting_xi, key=lambda pid: -squad_xp[pid]):
+                if pid != cap_id:
                     vc_id = pid
                     break
 

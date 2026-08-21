@@ -1,5 +1,5 @@
 # ⚽ FPL Gameweek 1 Decision Report
-**Status:** `DRY RUN (Preview for Email Review)`
+**Status:** `EXECUTED (Applied to FPL Server)`
 
 ### 🎖️ Captaincy
 - **Captain (C):** **Haaland** (xP: 0.19)
@@ -38,4 +38,4 @@
 3. **Soler** (DEF) - xP: 0.0
 4. **O'Nien** (DEF) - xP: 0.0
 
-*Auto-generated at DRY RUN (Preview for Email Review) window.*
+*Auto-generated at EXECUTED (Applied to FPL Server) window.*

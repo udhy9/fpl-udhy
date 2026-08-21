@@ -154,7 +154,7 @@ class FPLOptimizer:
             if self._name_matches(pid, must_start) or pid in self.manual_locks:
                 if not self.analyzer.should_not_start(pid):
                     prob += start_vars[pid] == 1
-            if self._name_matches(pid, must_bench) or self.analyzer.should_not_start(pid):
+            if self._name_matches(pid, must_bench) or self.analyzer.should_not_start(pid) or self.analyzer.is_fringe(pid):
                 if not (pos_map[pid] == 1 and all(
                     self.analyzer.should_not_start(gk)
                     for gk in current_squad_ids if pos_map[gk] == 1

@@ -11,6 +11,8 @@ class FPLAnalyzer:
         self.element_types = {et["id"]: et for et in bootstrap_data["element_types"]}
         self.events = bootstrap_data.get("events", [])
         self.fixtures = fixtures or []
+        self.current_gw = self._infer_gameweek()
+        self.fixture_horizon = 5
 
     @staticmethod
     def _num(value, default=0.0):
@@ -21,28 +23,91 @@ class FPLAnalyzer:
         except (TypeError, ValueError):
             return default
 
+    def _infer_gameweek(self):
+        current = next((e for e in self.events if e.get("is_next")), None)
+        if current is None:
+            current = next((e for e in self.events if e.get("is_current") and not e.get("finished")), None)
+        if current is None and self.events:
+            current = self.events[0]
+        return int(current["id"]) if current else 1
+
+    def calculate_xmins(self, player):
+        """Expected-minutes / starting-likelihood multiplier in [0.0, 1.0]."""
+        status = player.get("status")
+        chance = player.get("chance_of_playing_next_round")
+        if status in ("i", "s", "u"):
+            return 0.0
+        if chance is not None:
+            chance = self._num(chance)
+            if chance < 50:
+                return 0.0
+            if chance == 50:
+                return 0.4
+            if chance == 75:
+                return 0.75
+
+        starts = int(self._num(player.get("starts")))
+        minutes = int(self._num(player.get("minutes")))
+        selected_by = self._num(player.get("selected_by_percent"))
+        now_cost = int(self._num(player.get("now_cost")))
+        gw_num = self.current_gw or 1
+
+        if player.get("element_type") == 1 and not self.is_likely_starting_gk(player["id"]):
+            return 0.15
+
+        if gw_num > 2 and starts == 0 and minutes < 45:
+            return 0.15
+
+        if starts >= 1 or selected_by > 5.0:
+            return 1.0
+        if starts == 0 and minutes < 45 and selected_by < 2.0 and now_cost <= 45:
+            return 0.2
+        return 0.5
+
+    def is_fringe(self, player_id):
+        player = self.elements.get(player_id)
+        if not player:
+            return True
+        return self.calculate_xmins(player) < 0.4
+
+    def fixture_factor(self, player_id, horizon=None):
+        """Rolling FDR multiplier for the next N gameweeks. Easier run → higher factor."""
+        horizon = horizon or self.fixture_horizon
+        player = self.elements.get(player_id)
+        if not player or not self.fixtures:
+            return 1.0
+        team_id = player["team"]
+        gw = self.current_gw or 1
+        fdrs = []
+        for fx in self.fixtures:
+            event = fx.get("event")
+            if event is None or event < gw or event >= gw + horizon:
+                continue
+            if fx.get("finished"):
+                continue
+            if fx.get("team_h") == team_id:
+                fdrs.append(self._num(fx.get("team_h_difficulty"), 3.0))
+            elif fx.get("team_a") == team_id:
+                fdrs.append(self._num(fx.get("team_a_difficulty"), 3.0))
+        if not fdrs:
+            return 1.0
+        avg_fdr = sum(fdrs) / len(fdrs)
+        return round(max(0.7, min(1.3, 1.0 + (3.0 - avg_fdr) * 0.1)), 3)
+
     def calculate_xp(self, player_id):
         player = self.elements.get(player_id)
         if not player:
             return 0.0
 
-        chance_playing = player.get("chance_of_playing_next_round")
-        if chance_playing is not None:
-            avail = chance_playing / 100.0
-        elif player["status"] in ["i", "s", "u"]:
-            avail = 0.0
-        elif player["status"] == "d":
-            avail = 0.5
-        else:
-            avail = 1.0
-
-        if avail == 0.0:
+        xmins_factor = self.calculate_xmins(player)
+        if xmins_factor == 0.0:
             return 0.0
 
         pos = player["element_type"]
         form = self._num(player.get("form"))
         ep_next = self._num(player.get("ep_next"), form)
         ict_index = self._num(player.get("ict_index")) / 10.0
+        selected_by = self._num(player.get("selected_by_percent"))
 
         xg = self._num(player.get("expected_goals"))
         xa = self._num(player.get("expected_assists"))
@@ -67,13 +132,9 @@ class FPLAnalyzer:
         else:
             team_strength = ((home_str + away_str) / 2.0) / 1100.0
 
-        starts = int(self._num(player.get("starts")))
-        minutes = int(self._num(player.get("minutes")))
-        minutes_factor = 1.0 if minutes > 180 or starts >= 2 else 0.75
-        if pos == 1 and not self.is_likely_starting_gk(player_id):
-            minutes_factor *= 0.15
-
-        return round(max(0.0, base_score * avail * team_strength * minutes_factor), 2)
+        ownership_bonus = 1.0 + min(0.15, selected_by / 100.0)
+        fdr_factor = self.fixture_factor(player_id)
+        return round(max(0.0, base_score * xmins_factor * team_strength * ownership_bonus * fdr_factor), 2)
 
     def playing_chance(self, player_id):
         player = self.elements.get(player_id) or {}
@@ -133,6 +194,8 @@ class FPLAnalyzer:
         chance = player.get("chance_of_playing_next_round")
         if (chance is not None and chance <= 50) or player.get("status") == "d":
             return -50.0 + float(xp or 0.0)
+        if self.is_fringe(player_id):
+            return -10.0 + float(xp or 0.0)
         return float(xp or 0.0)
 
     def order_bench(self, bench, squad_xp):
@@ -145,19 +208,29 @@ class FPLAnalyzer:
         )
         return bench_gk + bench_outfield
 
-    def load_fixtures(self, gameweek):
+    def load_fixture_horizon(self, gameweek, horizon=5):
+        self.current_gw = int(gameweek)
+        self.fixture_horizon = horizon
         try:
             res = requests.get(
-                f"https://fantasy.premierleague.com/api/fixtures/?event={gameweek}",
+                "https://fantasy.premierleague.com/api/fixtures/",
                 timeout=30,
                 headers={"User-Agent": "fpl-udhy-agent"},
             )
             if res.status_code == 200:
-                self.fixtures = res.json() or []
+                all_fixtures = res.json() or []
+                self.fixtures = [
+                    fx for fx in all_fixtures
+                    if fx.get("event") and gameweek <= fx["event"] < gameweek + horizon
+                ]
+                print(f"Loaded {len(self.fixtures)} fixtures for GW {gameweek}-{gameweek + horizon - 1}.")
         except Exception as exc:
-            print(f"Fixture fetch failed: {exc}")
+            print(f"Fixture horizon fetch failed: {exc}")
             self.fixtures = []
         return self.fixtures
+
+    def load_fixtures(self, gameweek):
+        return self.load_fixture_horizon(gameweek, horizon=self.fixture_horizon)
 
     def _pos(self, pid):
         return self.elements[pid]["element_type"]
@@ -187,7 +260,10 @@ class FPLAnalyzer:
 
     def _opponent_map(self):
         mapping = {}
+        gw = self.current_gw
         for fx in self.fixtures:
+            if gw and fx.get("event") not in (None, gw):
+                continue
             home, away = fx.get("team_h"), fx.get("team_a")
             if home and away:
                 mapping[home] = away
@@ -252,6 +328,32 @@ class FPLAnalyzer:
                 f"Benched flagged {self.elements[pid]['web_name']} for healthy {self.elements[swap]['web_name']}."
             )
 
+        for pid in list(starting):
+            if not self.is_fringe(pid) or self._pos(pid) == 1:
+                continue
+            replacements = [
+                bid for bid in bench
+                if not self.is_fringe(bid) and not self._is_risky(bid) and self._pos(bid) != 1
+            ]
+            replacements.sort(key=lambda x: xp.get(x, 0), reverse=True)
+            swapped = False
+            for swap in replacements:
+                trial = [sid for sid in starting if sid != pid] + [swap]
+                if not self._formation_ok(trial):
+                    continue
+                starting.remove(pid)
+                starting.append(swap)
+                bench.remove(swap)
+                bench.append(pid)
+                notes.append(
+                    f"Benched fringe {self.elements[pid]['web_name']} (low xMins); "
+                    f"started nailed {self.elements[swap]['web_name']}."
+                )
+                swapped = True
+                break
+            if swapped:
+                continue
+
         starting.sort(key=lambda pid: (self._pos(pid), -xp.get(pid, 0)))
         bench = self.order_bench(bench, xp)
 
@@ -292,8 +394,8 @@ class FPLAnalyzer:
         heuristic_plan, heuristic_reason = self.apply_heuristic_tactics(baseline_plan)
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            print("GEMINI_API_KEY not set. Using heuristic tactical layer.")
-            return heuristic_plan, f"Heuristic tactics (set GEMINI_API_KEY for Gemini review). {heuristic_reason}"
+            print("GEMINI_API_KEY not set. Using xMins heuristic tactical layer.")
+            return heuristic_plan, f"Quantitative xMins & statistical solver. {heuristic_reason}"
 
         squad_summary = []
         for pid in squad_ids:
@@ -307,6 +409,9 @@ class FPLAnalyzer:
                 "news": player.get("news", ""),
                 "chance_of_playing": player.get("chance_of_playing_next_round"),
                 "status": player.get("status"),
+                "selected_by_%": player.get("selected_by_percent"),
+                "xmins": self.calculate_xmins(player),
+                "fringe_or_youth": self.is_fringe(pid),
                 "baseline_xp": baseline_plan["squad_xp"].get(pid, 0.0),
             })
 
@@ -322,27 +427,30 @@ class FPLAnalyzer:
             })
 
         prompt = f"""
-You are an elite Fantasy Premier League manager.
-Review this 15-man squad and baseline XI for the next gameweek.
+You are an expert FPL manager using xMins, ownership, and a 5-GW FDR horizon.
+Eliminate non-starting youth/fodder from the Starting XI and prefer nailed 90-minute players.
 
 SQUAD:
 {json.dumps(squad_summary, indent=2)}
 
-FIXTURES (FDR):
+FIXTURES (next {self.fixture_horizon} GWs):
 {json.dumps(fixture_summary, indent=2)}
 
 BASELINE:
-- Starting XI IDs: {baseline_plan['starting_xi']}
-- Bench IDs: {baseline_plan['bench']}
-- Captain ID: {baseline_plan['captain']}
-- VC ID: {baseline_plan['vice_captain']}
+{json.dumps({
+    "starting_xi": baseline_plan["starting_xi"],
+    "bench": baseline_plan["bench"],
+    "captain": baseline_plan["captain"],
+    "vice_captain": baseline_plan["vice_captain"],
+}, indent=2)}
 
-RULES:
-1. ANTI-CANNIBALIZATION: do not start defenders/GK whose opponent is a team we also start a premium attacker from.
-2. FIXTURES: prefer easier FDR and healthy minutes.
-3. INJURY/ROTATION: do not start status d/i/u or chance_of_playing < 75 if a healthy same-position bench option exists.
-4. Respect overrides: {json.dumps(overrides)}
-5. Use only the 15 squad IDs. Formation must be 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
+TACTICAL OBJECTIVES:
+1. STARTER INTEGRITY: never start fringe/youth/non-playing options (low xmins / fringe_or_youth true, e.g. Lucky, Ramsay) if a nailed midfielder or forward can start instead.
+2. FORMATION FLEXIBILITY: use 3-4-3, 3-5-2, or 4-4-2 so all 11 outfield starters are nailed 90-minute options.
+3. BENCH SAFETY: GK first, then healthy nailed subs, then doubtful/injured last.
+4. ANTI-CANNIBALIZATION: do not start defenders/GK whose opponent is a team we also start a premium attacker from.
+5. Respect overrides: {json.dumps(overrides)}
+6. Use only the 15 squad IDs. Formation must be 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
 
 Return ONLY JSON:
 {{
@@ -350,7 +458,7 @@ Return ONLY JSON:
   "bench": [4 ids, GK first if present],
   "captain": id,
   "vice_captain": id,
-  "tactical_reasoning": "short paragraph"
+  "tactical_reasoning": "short paragraph covering formation, non-starters benched, and captaincy"
 }}
 """
         try:
@@ -386,4 +494,4 @@ Return ONLY JSON:
         except Exception as exc:
             print(f"LLM tactical review failed: {exc}. Using heuristic fallback.")
 
-        return heuristic_plan, f"Baseline/heuristic selection. {heuristic_reason}"
+        return heuristic_plan, f"Quantitative xMins optimization applied. {heuristic_reason}"

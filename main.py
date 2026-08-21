@@ -34,6 +34,7 @@ def run(mode="dry-run"):
         overrides = json.load(f)
 
     analyzer = FPLAnalyzer(bootstrap)
+    analyzer.load_fixture_horizon(gw)
     optimizer = FPLOptimizer(
         analyzer, my_team, bootstrap, overrides, manual_locks=manual_transfers, gameweek=gw
     )

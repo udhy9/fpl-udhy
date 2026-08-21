@@ -82,28 +82,10 @@ jobs:
         if: steps.mode.outputs.run == 'true'
         env:
           FPL_TEAM_ID: ${{ secrets.FPL_TEAM_ID }}
-          FPL_REFRESH_TOKEN: ${{ secrets.FPL_REFRESH_TOKEN }}
+          FPL_ACCESS_TOKEN: ${{ secrets.FPL_ACCESS_TOKEN }}
           FPL_COOKIE: ${{ secrets.FPL_COOKIE }}
-          FPL_EMAIL: ${{ secrets.FPL_EMAIL }}
-          FPL_PASSWORD: ${{ secrets.FPL_PASSWORD }}
         run: |
           python main.py --mode ${{ steps.mode.outputs.mode }}
-
-      - name: Persist rotated FPL refresh token
-        if: steps.mode.outputs.run == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          if [ ! -f rotated_refresh_token.txt ]; then
-            echo "No rotated refresh token to persist."
-            exit 0
-          fi
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::FPL rotated the refresh token. Add a GH_PAT secret with secrets:write so the next run can update FPL_REFRESH_TOKEN automatically."
-            exit 0
-          fi
-          gh secret set FPL_REFRESH_TOKEN < rotated_refresh_token.txt
-          echo "Updated FPL_REFRESH_TOKEN secret with rotated token."
 
       - name: Publish report summary
         if: steps.mode.outputs.run == 'true'

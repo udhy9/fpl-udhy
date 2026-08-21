@@ -37,8 +37,9 @@ def run(mode="dry-run"):
 
     analyzer = FPLAnalyzer(bootstrap)
     analyzer.load_fixture_horizon(gw)
+    analyzer.load_historical_priors()
     optimizer = FPLOptimizer(
-        analyzer, my_team, bootstrap, overrides, manual_locks=manual_transfers, gameweek=gw
+        analyzer, my_team, bootstrap, overrides, manual_locks=manual_transfers, gameweek=gw, current_gw=gw
     )
     plan = optimizer.optimize()
 
@@ -56,6 +57,8 @@ def run(mode="dry-run"):
         f"\n\n### 🧠 Tactical AI Analysis\n"
         f"- **Free Transfers Available:** {plan.get('ft_available', ft_limit)} / 5 "
         f"({'banked' if plan.get('bank_transfer') else 'in play'})\n"
+        f"- **Automated Chip Strategy:** `{plan.get('chip_recommendation') or 'None (standard gameweek)'}`"
+        f"{' — playing `' + plan['chip'] + '`' if plan.get('chip') else ''}\n"
         f"- **Rationale:** {tactical_reasoning}\n"
     )
 
@@ -74,8 +77,9 @@ def run(mode="dry-run"):
         transfers_out = plan.get("transfers_out") or []
         if transfers_in and transfers_out:
             print(f"Submitting transfers: OUT {transfers_out} -> IN {transfers_in}")
+            transfer_chip = plan.get("chip") if plan.get("chip") in ("wildcard", "freehit") else None
             transfer_res = client.submit_transfers(
-                transfers_in, transfers_out, chip=plan.get("chip")
+                transfers_in, transfers_out, chip=transfer_chip
             )
             print(f"Transfers submitted: {transfer_res}")
             my_team = client.get_my_team(current_gw=gw, require_auth=True)
@@ -118,7 +122,8 @@ def run(mode="dry-run"):
                 "is_vice_captain": False,
             })
 
-        lineup_res = client.submit_lineup(picks, chip=None)
+        lineup_chip = plan.get("chip") if plan.get("chip") in ("bboost", "3xc") else None
+        lineup_res = client.submit_lineup(picks, chip=lineup_chip)
         print(f"Lineup submitted: {lineup_res}")
 
         verified = client.get_my_team(current_gw=gw, require_auth=True)

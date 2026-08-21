@@ -7,13 +7,14 @@ class FPLOptimizer:
     FT_BANK_CAP = 5
     HORIZON_WEEKS = 3
     GAIN_THRESHOLD = 2.0
-    def __init__(self, analyzer, my_team_data, bootstrap_data, overrides, manual_locks=None, gameweek=1):
+    def __init__(self, analyzer, my_team_data, bootstrap_data, overrides, manual_locks=None, gameweek=1, current_gw=None):
         self.analyzer = analyzer
         self.my_team_data = my_team_data
         self.elements = analyzer.elements
         self.overrides = overrides
         self.manual_locks = manual_locks or []
-        self.gameweek = gameweek
+        self.gameweek = int(current_gw or gameweek or 1)
+        self.current_gw = self.gameweek
         self.current_picks = [p["element"] for p in my_team_data.get("picks", [])]
         self.selling_price = {
             p["element"]: p.get("selling_price") or self.elements[p["element"]]["now_cost"]
@@ -38,6 +39,24 @@ class FPLOptimizer:
     def _name_matches(self, pid, names):
         name = self.elements[pid]["web_name"].lower()
         return any(n.lower() in name for n in names if n)
+
+    def _available_chips(self):
+        names = set()
+        for chip in self.my_team_data.get("chips") or []:
+            if chip.get("status_for_entry") == "available" and chip.get("name"):
+                names.add(chip["name"])
+        return names
+
+    def _chip_to_play(self, recommendation):
+        if self.gameweek == 1 or not recommendation:
+            return None
+        if recommendation not in self._available_chips():
+            return None
+        if recommendation in ("bboost", "3xc"):
+            return recommendation
+        if recommendation in ("wildcard", "freehit") and self.overrides.get("allow_auto_chips"):
+            return recommendation
+        return None
 
     def _can_transfer_in(self, player):
         if player.get("status") in ("u", "i", "s"):
@@ -326,6 +345,25 @@ class FPLOptimizer:
                     vc_id = pid
                     break
 
+        squad_ids = list(starting_xi) + list(ordered_bench)
+        fixture_mults = self.analyzer.fixture_multipliers or self.analyzer.get_fixture_multipliers(self.current_gw)
+        chip_rec, chip_meta = self.analyzer.evaluate_chip_triggers(
+            self.current_gw, squad_ids, fixture_mults
+        )
+        chip_to_play = self._chip_to_play(chip_rec)
+        if chip_to_play == "3xc":
+            dgw_starters = [
+                pid for pid in starting_xi
+                if fixture_mults.get(self.elements[pid]["team"], 1) >= 2
+            ]
+            if dgw_starters:
+                cap_id = max(dgw_starters, key=lambda pid: squad_xp.get(pid, 0.0))
+                if vc_id == cap_id:
+                    for pid in ranked_starters:
+                        if pid != cap_id:
+                            vc_id = pid
+                            break
+
         return {
             "starting_xi": starting_xi,
             "bench": ordered_bench,
@@ -334,7 +372,9 @@ class FPLOptimizer:
             "squad_xp": squad_xp,
             "transfers_in": transfers_in,
             "transfers_out": transfers_out,
-            "chip": None,
+            "chip": chip_to_play,
+            "chip_recommendation": chip_rec,
+            "chip_meta": chip_meta,
             "unlimited_transfers": max_transfers >= 15,
             "ft_available": max(0, int(self.free_transfers or 0)),
             "bank_transfer": bank_transfer,

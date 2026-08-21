@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import os
 
@@ -13,6 +15,8 @@ class FPLAnalyzer:
         self.fixtures = fixtures or []
         self.current_gw = self._infer_gameweek()
         self.fixture_horizon = 5
+        self.fixture_multipliers = {}
+        self.historical_points = {}
 
     @staticmethod
     def _num(value, default=0.0):
@@ -79,20 +83,152 @@ class FPLAnalyzer:
             return False
         return self.is_likely_starting_gk(player_id) and self.calculate_xmins(player) >= 1.0
 
-    def historical_baseline(self, player):
-        """Last-season / career PPG, weighted more heavily in GW1-4 when form is empty."""
-        ppg = self._num(player.get("points_per_game"))
-        total = self._num(player.get("total_points"))
-        starts = max(1.0, self._num(player.get("starts")))
-        baseline = ppg if ppg > 0 else (total / starts if total else 0.0)
-        gw = self.current_gw or 1
-        if gw <= 4:
-            weight = 0.40
-        elif gw <= 8:
-            weight = 0.20
-        else:
-            weight = 0.10
-        return baseline * weight
+    def historical_ppm(self, player):
+        """Last-season points per match (Vaastav / FPL history_past / bootstrap PPG)."""
+        total = self.historical_points.get(player.get("id"))
+        if not total:
+            past = player.get("history_past") or []
+            if past:
+                total = self._num(past[-1].get("total_points"))
+        if total:
+            return float(total) / 38.0
+        return self._num(player.get("points_per_game"))
+
+    def decay_hist_weight(self, gw=None):
+        """50% historical prior at GW1, linear decay to 0 by GW6."""
+        gw = int(gw or self.current_gw or 1)
+        return max(0.0, 0.50 - (max(0, gw - 1) * 0.10))
+
+    def load_historical_priors(self):
+        """Load previous-season totals (Vaastav FPL dataset) keyed to current player IDs."""
+        self.historical_points = {}
+        text = ""
+        for season in ("2025-26", "2024-25", "2023-24"):
+            url = (
+                "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/"
+                f"master/data/{season}/cleaned_players.csv"
+            )
+            try:
+                res = requests.get(url, timeout=20, headers={"User-Agent": "fpl-udhy-agent"})
+                if res.status_code == 200 and "total_points" in res.text:
+                    text = res.text
+                    print(f"Loaded historical priors from Vaastav {season}.")
+                    break
+            except Exception as exc:
+                print(f"Historical prior fetch skipped for {season}: {exc}")
+        if not text:
+            print("No Vaastav historical file loaded; decaying prior will use points_per_game.")
+            return self.historical_points
+
+        by_name = {}
+        reader = csv.DictReader(io.StringIO(text))
+        for row in reader:
+            first = (row.get("first_name") or "").strip().lower()
+            second = (row.get("second_name") or "").strip().lower()
+            points = self._num(row.get("total_points"))
+            if not second:
+                continue
+            by_name[second] = points
+            by_name[f"{first} {second}"] = points
+            if first:
+                by_name[first] = points
+
+        for pid, player in self.elements.items():
+            web = (player.get("web_name") or "").strip().lower()
+            full = f"{(player.get('first_name') or '').strip()} {(player.get('second_name') or '').strip()}".strip().lower()
+            total = by_name.get(web) or by_name.get(full) or by_name.get((player.get("second_name") or "").strip().lower())
+            if total:
+                self.historical_points[pid] = total
+        print(f"Mapped last-season totals for {len(self.historical_points)} players.")
+        return self.historical_points
+
+    def get_fixture_multipliers(self, current_gw=None):
+        """DGW multiplier >= 2, BGW multiplier 0, otherwise 1."""
+        gw = int(current_gw or self.current_gw or 1)
+        counts = {tid: 0 for tid in self.teams}
+        event_fixtures = [fx for fx in (self.fixtures or []) if fx.get("event") == gw]
+        if not event_fixtures:
+            try:
+                res = requests.get(
+                    f"https://fantasy.premierleague.com/api/fixtures/?event={gw}",
+                    timeout=30,
+                    headers={"User-Agent": "fpl-udhy-agent"},
+                )
+                if res.status_code == 200:
+                    event_fixtures = res.json() or []
+            except Exception as exc:
+                print(f"DGW/BGW fixture fetch failed: {exc}")
+                self.fixture_multipliers = {tid: 1 for tid in self.teams}
+                return self.fixture_multipliers
+
+        for fx in event_fixtures:
+            home, away = fx.get("team_h"), fx.get("team_a")
+            if home in counts:
+                counts[home] += 1
+            if away in counts:
+                counts[away] += 1
+        self.fixture_multipliers = counts
+        doubles = sum(1 for n in counts.values() if n >= 2)
+        blanks = sum(1 for n in counts.values() if n == 0)
+        if doubles or blanks:
+            print(f"GW {gw} fixture multipliers: {doubles} DGW teams, {blanks} BGW teams.")
+        return self.fixture_multipliers
+
+    def team_gw_multiplier(self, team_id, event_id=None):
+        event_id = event_id or self.current_gw
+        if event_id == self.current_gw and self.fixture_multipliers:
+            return self.fixture_multipliers.get(team_id, 0)
+        count = 0
+        for fx in self.fixtures or []:
+            if fx.get("event") != event_id:
+                continue
+            if fx.get("team_h") == team_id or fx.get("team_a") == team_id:
+                count += 1
+        return count if self.fixtures else 1
+
+    def evaluate_chip_triggers(self, current_gw, squad_ids, fixture_multipliers=None):
+        """Recommend Wildcard / Free Hit / Bench Boost / Triple Captain. Does not force Wildcard."""
+        multipliers = fixture_multipliers if fixture_multipliers is not None else self.fixture_multipliers
+        injured_starters = 0
+        dgw_players = 0
+        bgw_players = 0
+        best_dgw_xp = 0.0
+        for pid in squad_ids:
+            player = self.elements.get(pid)
+            if not player:
+                continue
+            if self.should_not_start(pid):
+                injured_starters += 1
+            mult = multipliers.get(player["team"], 1) if multipliers else 1
+            if mult >= 2:
+                dgw_players += 1
+                best_dgw_xp = max(best_dgw_xp, self.calculate_xp(pid))
+            elif multipliers and mult == 0:
+                bgw_players += 1
+
+        recommendation = None
+        reason = "No chip trigger this week."
+        if current_gw > 1 and injured_starters >= 3:
+            recommendation = "wildcard"
+            reason = f"{injured_starters} injured/unavailable squad players — consider Wildcard."
+        elif bgw_players >= 4:
+            recommendation = "freehit"
+            reason = f"{bgw_players} blank-GW players — consider Free Hit."
+        elif dgw_players >= 10:
+            recommendation = "bboost"
+            reason = f"{dgw_players} DGW squad players — Bench Boost is live."
+        elif dgw_players >= 1 and best_dgw_xp > 14.0:
+            recommendation = "3xc"
+            reason = f"Premium DGW xP {best_dgw_xp:.1f} — Triple Captain is live."
+
+        stats = {
+            "injured_starters": injured_starters,
+            "dgw_players": dgw_players,
+            "bgw_players": bgw_players,
+            "best_dgw_xp": best_dgw_xp,
+            "reason": reason,
+        }
+        return recommendation, stats
 
     def attacking_defender_score(self, player):
         threat = self._num(player.get("threat")) / 100.0
@@ -174,17 +310,22 @@ class FPLAnalyzer:
         xg = self._num(player.get("expected_goals"))
         xa = self._num(player.get("expected_assists"))
         xgi = self._num(player.get("expected_goal_involvements"), xg + xa)
-        history = self.historical_baseline(player)
 
         if pos == 1:
-            base_score = (ep_next * 0.5) + (form * 0.3) + history + 1.5
+            in_season_score = (ep_next * 0.5) + (form * 0.3) + 1.5
         elif pos == 2:
             attacking_potential = self.attacking_defender_score(player)
-            base_score = (ep_next * 0.40) + (form * 0.20) + attacking_potential + history + 1.0
+            in_season_score = (ep_next * 0.40) + (form * 0.20) + attacking_potential + 1.0
         elif pos == 3:
-            base_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.2) + (ict_index * 0.2) + history
+            in_season_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.2) + (ict_index * 0.2)
         else:
-            base_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.4) + (ict_index * 0.2) + history
+            in_season_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.4) + (ict_index * 0.2)
+
+        hist_weight = self.decay_hist_weight()
+        hist_prior = self.historical_ppm(player)
+        if hist_prior <= 0:
+            hist_prior = in_season_score
+        blended_base = ((1.0 - hist_weight) * in_season_score) + (hist_weight * hist_prior)
 
         team = self.teams.get(player["team"], {}) or {}
         home_str = self._num(team.get("strength_overall_home"), 1100.0)
@@ -198,7 +339,7 @@ class FPLAnalyzer:
         ownership_weight = 1.0 + min(0.20, (selected_by / 100.0) * 0.5)
         if pos == 2 and selected_by >= 10.0:
             ownership_weight += 0.05
-        return max(0.0, base_score * xmins_factor * team_strength * ownership_weight)
+        return max(0.0, blended_base * xmins_factor * team_strength * ownership_weight)
 
     def horizon_xp(self, player_id, weeks=3):
         """Sum of next N single-GW xP estimates using that week's FDR."""
@@ -208,14 +349,23 @@ class FPLAnalyzer:
         gw = self.current_gw or 1
         total = 0.0
         for event_id in range(gw, gw + weeks):
-            total += base * self.fixture_factor_for_event(player_id, event_id)
+            player = self.elements.get(player_id) or {}
+            total += base * self.fixture_factor_for_event(player_id, event_id) * max(
+                self.team_gw_multiplier(player.get("team"), event_id), 0
+            )
         return round(total, 2)
 
-    def calculate_xp(self, player_id):
+    def calculate_xp(self, player_id, current_gw=None, fixture_multipliers=None):
+        if current_gw is not None:
+            self.current_gw = int(current_gw)
+        if fixture_multipliers is not None:
+            self.fixture_multipliers = fixture_multipliers
+        player = self.elements.get(player_id)
         base = self._unfdr_xp(player_id)
-        if base == 0.0:
+        if base == 0.0 or not player:
             return 0.0
-        return round(base * self.fixture_factor(player_id), 2)
+        mult = self.team_gw_multiplier(player["team"])
+        return round(base * self.fixture_factor(player_id) * mult, 2)
 
     def playing_chance(self, player_id):
         player = self.elements.get(player_id) or {}
@@ -308,6 +458,7 @@ class FPLAnalyzer:
         except Exception as exc:
             print(f"Fixture horizon fetch failed: {exc}")
             self.fixtures = []
+        self.get_fixture_multipliers(gameweek)
         return self.fixtures
 
     def load_fixtures(self, gameweek):
@@ -574,7 +725,9 @@ BASELINE:
     "transfers_in": baseline_plan.get("transfers_in") or [],
     "transfers_out": baseline_plan.get("transfers_out") or [],
     "bank_transfer": baseline_plan.get("bank_transfer"),
-    "transfer_strategy": baseline_plan.get("transfer_strategy"),
+    "chip_recommendation": baseline_plan.get("chip_recommendation"),
+    "chip_meta": baseline_plan.get("chip_meta"),
+    "chip": baseline_plan.get("chip"),
 }, indent=2)}
 
 TACTICAL OBJECTIVES:
@@ -582,9 +735,10 @@ TACTICAL OBJECTIVES:
 2. STARTER INTEGRITY & ANTI-CANNIBALIZATION: 11 nailed 90-min starters. Never start fringe/youth (Lucky, Ramsay). Never start 3 defenders against our own starting striker.
 3. PRESS CONFERENCE: use each player's news/status/chance_of_playing. Bench anyone the presser suggests is rotated, doubtful, or ruled out.
 4. FREE TRANSFER STRATEGY: only spend a transfer if a starter is long-term injured / ~0 xMins, or the move is clearly +EV. Otherwise set bank_transfer_recommendation=true to accumulate 2-5 FTs.
-5. BENCH SAFETY: GK first, healthy nailed 1st outfield sub, injured/doubtful last.
-6. Respect overrides: {json.dumps(overrides)}
-7. Use only the 15 squad IDs. Formation: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
+5. CHIP STRATEGY: respect the automated recommendation `{baseline_plan.get("chip_recommendation")}` ({(baseline_plan.get("chip_meta") or {}).get("reason")}). Only play Triple Captain / Bench Boost this week if that recommendation is 3xc or bboost. Do not activate Wildcard.
+6. BENCH SAFETY: GK first, healthy nailed 1st outfield sub, injured/doubtful last.
+7. Respect overrides: {json.dumps(overrides)}
+8. Use only the 15 squad IDs. Formation: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
 
 Return ONLY JSON:
 {{

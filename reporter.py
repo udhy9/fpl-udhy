@@ -34,6 +34,25 @@ class FPLReporter:
                 if plan.get("transfer_strategy"):
                     lines.append(f"- {plan['transfer_strategy']}")
                 lines.append("")
+
+        chip_rec = plan.get("chip_recommendation")
+        chip_play = plan.get("chip")
+        chip_meta = plan.get("chip_meta") or {}
+        lines.append("### 🎰 Automated Chip Strategy")
+        lines.append(f"- **Recommendation:** `{chip_rec or 'None (standard gameweek)'}`")
+        if chip_play:
+            lines.append(f"- **Playing this week:** `{chip_play}`")
+        else:
+            lines.append("- **Playing this week:** none (alert only; Wildcard/Free Hit are never auto-played unless `allow_auto_chips` is set)")
+        if chip_meta.get("reason"):
+            lines.append(f"- {chip_meta['reason']}")
+        if chip_meta:
+            lines.append(
+                f"- Injured/unavailable: {chip_meta.get('injured_starters', 0)}; "
+                f"DGW players: {chip_meta.get('dgw_players', 0)}; "
+                f"BGW players: {chip_meta.get('bgw_players', 0)}"
+            )
+        lines.append("")
         if transfers_in and transfers_out:
             lines.append("### 🔄 Planned Transfers")
             lines.append("| Out | In |")

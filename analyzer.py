@@ -23,16 +23,22 @@ class FPLAnalyzer:
         if availability_factor == 0.0:
             return 0.0
 
-        # Base Form & Expected Stats
-        form = float(player.get("form", 0.0))
-        ep_next = float(player.get("ep_next", 0.0)) if player.get("ep_next") is not None else form
-        threat = float(player.get("threat", 0.0)) / 100.0
-        creativity = float(player.get("creativity", 0.0)) / 100.0
+        def _num(value, default=0.0):
+            if value is None or value == "":
+                return default
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
 
-        # Fixture Difficulty & Home Advantage (approx FDR scaling)
-        team = self.teams.get(player["team"], {})
-        team_strength = team.get("strength", 3)
-        strength_factor = 1.0 + (team_strength - 3) * 0.05
+        form = _num(player.get("form"))
+        ep_next = _num(player.get("ep_next"), form)
+        threat = _num(player.get("threat")) / 100.0
+        creativity = _num(player.get("creativity")) / 100.0
+
+        team = self.teams.get(player["team"], {}) or {}
+        team_strength = _num(team.get("strength"), 3.0)
+        strength_factor = 1.0 + (team_strength - 3.0) * 0.05
 
         base_xp = (ep_next * 0.6) + (form * 0.2) + ((threat + creativity) * 0.2)
         final_xp = max(0.0, base_xp * availability_factor * strength_factor)

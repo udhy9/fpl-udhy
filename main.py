@@ -24,11 +24,15 @@ def run(mode="dry-run"):
         overrides = json.load(f)
 
     analyzer = FPLAnalyzer(bootstrap)
-    optimizer = FPLOptimizer(analyzer, my_team, bootstrap, overrides, manual_locks=manual_transfers)
+    optimizer = FPLOptimizer(
+        analyzer, my_team, bootstrap, overrides, manual_locks=manual_transfers, gameweek=gw
+    )
     plan = optimizer.optimize()
 
     is_dry_run = (mode == "dry-run")
-    report_md = FPLReporter.generate_report(gw, plan, analyzer.elements, manual_transfers, is_dry_run)
+    report_md = FPLReporter.generate_report(
+        gw, plan, analyzer.elements, manual_transfers, is_dry_run, teams=analyzer.teams
+    )
 
     with open("REPORT.md", "w") as f:
         f.write(report_md)
@@ -55,6 +59,11 @@ def run(mode="dry-run"):
                 "is_captain": False,
                 "is_vice_captain": False
             })
+        if plan.get("transfers_in") and plan.get("transfers_out"):
+            client.submit_transfers(
+                plan["transfers_in"], plan["transfers_out"], chip=plan.get("chip")
+            )
+            print(f"Submitted {len(plan['transfers_in'])} GW {gw} transfers.")
         client.submit_lineup(picks)
         client.save_state_snapshot(gw, my_team)
         print(f"Successfully submitted GW {gw} lineup to FPL.")

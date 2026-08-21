@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import requests
 
 
@@ -19,6 +20,7 @@ class FPLClient:
         self.refresh_token = refresh_token or os.environ.get("FPL_REFRESH_TOKEN")
         self.access_token = None
         self.rotated_refresh_token = None
+        self.my_team = None
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -30,10 +32,15 @@ class FPLClient:
     def _extract_refresh_token(raw):
         if not raw:
             return None
-        raw = raw.strip()
+        raw = raw.strip().lstrip("\ufeff").strip().strip('"').strip("'")
+        if raw.lower().startswith("bearer "):
+            raw = raw[7:].strip().strip('"').strip("'")
         if raw.startswith("{"):
             data = json.loads(raw)
             return data.get("refresh_token") or data.get("refreshToken")
+        match = re.search(r'refresh_token["\']?\s*[:=]\s*["\']([^"\']+)["\']', raw)
+        if match:
+            return match.group(1)
         return raw
 
     def login(self):
@@ -44,6 +51,7 @@ class FPLClient:
                 "login from GitHub Actions. Copy the oidc.user refresh token from "
                 "fantasy.premierleague.com DevTools and store it as a GitHub secret."
             )
+        print(f"FPL refresh token loaded (length={len(refresh)}).")
 
         res = self.session.post(
             self.TOKEN_URL,
@@ -98,7 +106,8 @@ class FPLClient:
     def get_my_team(self):
         res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
         res.raise_for_status()
-        return res.json()
+        self.my_team = res.json()
+        return self.my_team
 
     def save_state_snapshot(self, gameweek, team_data):
         os.makedirs("data", exist_ok=True)
@@ -130,13 +139,20 @@ class FPLClient:
         elements = self.get_bootstrap_data()["elements"]
         id_to_player = {p["id"]: p for p in elements}
 
+        selling = {}
+        if self.my_team:
+            selling = {
+                p["element"]: p.get("selling_price") or id_to_player[p["element"]]["now_cost"]
+                for p in self.my_team.get("picks", [])
+            }
+
         transfers_payload = []
         for out_id, in_id in zip(transfers_out, transfers_in):
             transfers_payload.append({
                 "element_in": in_id,
                 "element_out": out_id,
                 "purchase_price": id_to_player[in_id]["now_cost"],
-                "selling_price": id_to_player[out_id]["now_cost"]
+                "selling_price": selling.get(out_id, id_to_player[out_id]["now_cost"]),
             })
 
         payload = {

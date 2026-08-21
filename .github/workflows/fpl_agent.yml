@@ -72,6 +72,12 @@ jobs:
           print(f"GW {event['id']} minutes_to_deadline={minutes:.1f} mode={mode} run={should_run}")
           PY
 
+      - name: Scheduled skip notice
+        if: steps.mode.outputs.run != 'true'
+        run: |
+          echo "Scheduled check only. Deadline is more than 2 hours away, so this run did not log in or change your FPL team."
+          echo "To test for real: Actions → Run workflow → dry-run first, then execute."
+
       - name: Run FPL Agent
         if: steps.mode.outputs.run == 'true'
         env:

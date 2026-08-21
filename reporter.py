@@ -24,6 +24,16 @@ class FPLReporter:
         if plan.get("unlimited_transfers"):
             lines.append("### ♻️ Transfer Window")
             lines.append("- GW1/unlimited free transfers. Wildcard chip is **not** played.\n")
+        else:
+            ft = plan.get("ft_available")
+            if ft is not None:
+                lines.append("### 🏦 Free Transfer Strategy")
+                action = "BANK this week's FT" if plan.get("bank_transfer") else "PLAY qualifying transfer(s)"
+                lines.append(f"- **Available:** {ft} / 5")
+                lines.append(f"- **Action:** {action}")
+                if plan.get("transfer_strategy"):
+                    lines.append(f"- {plan['transfer_strategy']}")
+                lines.append("")
         if transfers_in and transfers_out:
             lines.append("### 🔄 Planned Transfers")
             lines.append("| Out | In |")
@@ -35,7 +45,7 @@ class FPLReporter:
             lines.append("")
         else:
             lines.append("### 🔄 Planned Transfers")
-            lines.append("- None — current 15 is already optimal under the 0-hit / budget rules.\n")
+            lines.append("- None — banking the FT / current 15 already satisfies the 3-GW EV rule.\n")
 
         if manual_transfers:
             lines.append("### 👤 Manual Moves Detected & Preserved")

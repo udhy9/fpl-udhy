@@ -4,6 +4,9 @@ import pulp
 
 
 class FPLOptimizer:
+    FT_BANK_CAP = 5
+    HORIZON_WEEKS = 3
+    GAIN_THRESHOLD = 2.0
     def __init__(self, analyzer, my_team_data, bootstrap_data, overrides, manual_locks=None, gameweek=1):
         self.analyzer = analyzer
         self.my_team_data = my_team_data
@@ -118,6 +121,79 @@ class FPLOptimizer:
                 transfers_in.append(in_id)
         return transfers_in, transfers_out
 
+    def _is_forced_transfer(self, out_id):
+        player = self.elements.get(out_id) or {}
+        return (
+            self.analyzer.should_not_start(out_id)
+            or self.analyzer.is_unavailable(out_id)
+            or self.analyzer.calculate_xmins(player) == 0.0
+        )
+
+    def _horizon_gain(self, out_id, in_id):
+        return self.analyzer.horizon_xp(in_id, self.HORIZON_WEEKS) - self.analyzer.horizon_xp(
+            out_id, self.HORIZON_WEEKS
+        )
+
+    def _apply_ft_strategy(self, transfers_in, transfers_out):
+        ft = max(0, int(self.free_transfers or 0))
+        if self.gameweek == 1:
+            return (
+                transfers_in,
+                transfers_out,
+                False,
+                "GW1 unlimited window; FT banking is skipped.",
+            )
+
+        kept_in, kept_out, notes = [], [], []
+        scored = []
+        for out_id, in_id in zip(transfers_out, transfers_in):
+            forced = self._is_forced_transfer(out_id)
+            gain = self._horizon_gain(out_id, in_id)
+            scored.append((forced, gain, out_id, in_id))
+        scored.sort(key=lambda row: (not row[0], -row[1]))
+
+        for forced, gain, out_id, in_id in scored:
+            out_name = self.elements[out_id]["web_name"]
+            in_name = self.elements[in_id]["web_name"]
+            if forced:
+                kept_in.append(in_id)
+                kept_out.append(out_id)
+                notes.append(f"{out_name}→{in_name} forced (injury/0 xMins, 3GW {gain:+.1f}).")
+                continue
+            if gain > self.GAIN_THRESHOLD:
+                kept_in.append(in_id)
+                kept_out.append(out_id)
+                notes.append(f"{out_name}→{in_name} played (3GW gain {gain:+.1f} > {self.GAIN_THRESHOLD}).")
+                continue
+            notes.append(
+                f"{out_name}→{in_name} banked (3GW gain {gain:+.1f} ≤ {self.GAIN_THRESHOLD})."
+            )
+
+        bank = len(kept_in) == 0
+        next_ft = min(self.FT_BANK_CAP, ft + (1 if bank and ft < self.FT_BANK_CAP else 0))
+        if bank:
+            strategy = (
+                f"Banking FT ({ft}/{self.FT_BANK_CAP} now"
+                f"{'' if ft >= self.FT_BANK_CAP else f', rolling toward {next_ft}'}"
+                "). No injury-forced move and no 3-GW gain above "
+                f"{self.GAIN_THRESHOLD} pts. " + " ".join(notes)
+            ).strip()
+        else:
+            strategy = (
+                f"Playing {len(kept_in)} transfer(s) from {ft} FT(s); "
+                f"unused FTs roll toward a {self.FT_BANK_CAP}-FT mini-wildcard. "
+                + " ".join(notes)
+            ).strip()
+        return kept_in, kept_out, bank, strategy
+
+    def _squad_after_transfers(self, transfers_in, transfers_out):
+        squad = list(self.current_picks)
+        for out_id, in_id in zip(transfers_out, transfers_in):
+            squad = [in_id if pid == out_id else pid for pid in squad]
+            if in_id not in squad:
+                squad.append(in_id)
+        return squad[:15]
+
     def optimize(self):
         max_transfers = self._max_transfers()
         current_squad_ids = list(self.current_picks)
@@ -127,6 +203,10 @@ class FPLOptimizer:
             squad_xp_all = {pid: self.analyzer.calculate_xp(pid) for pid in current_squad_ids}
 
         transfers_in, transfers_out = self._pair_transfers(self.current_picks, current_squad_ids)
+        transfers_in, transfers_out, bank_transfer, transfer_strategy = self._apply_ft_strategy(
+            transfers_in, transfers_out
+        )
+        current_squad_ids = self._squad_after_transfers(transfers_in, transfers_out)
         must_start = self.overrides.get("must_start", [])
         must_bench = self.overrides.get("must_bench", [])
         lock_cap = self.overrides.get("lock_captain", "").strip().lower()
@@ -221,4 +301,7 @@ class FPLOptimizer:
             "transfers_out": transfers_out,
             "chip": None,
             "unlimited_transfers": max_transfers >= 15,
+            "ft_available": max(0, int(self.free_transfers or 0)),
+            "bank_transfer": bank_transfer,
+            "transfer_strategy": transfer_strategy,
         }

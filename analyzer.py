@@ -94,11 +94,27 @@ class FPLAnalyzer:
         avg_fdr = sum(fdrs) / len(fdrs)
         return round(max(0.7, min(1.3, 1.0 + (3.0 - avg_fdr) * 0.1)), 3)
 
-    def calculate_xp(self, player_id):
+    def fixture_factor_for_event(self, player_id, event_id):
+        player = self.elements.get(player_id)
+        if not player or not self.fixtures:
+            return 1.0
+        team_id = player["team"]
+        for fx in self.fixtures:
+            if fx.get("event") != event_id or fx.get("finished"):
+                continue
+            if fx.get("team_h") == team_id:
+                fdr = self._num(fx.get("team_h_difficulty"), 3.0)
+            elif fx.get("team_a") == team_id:
+                fdr = self._num(fx.get("team_a_difficulty"), 3.0)
+            else:
+                continue
+            return round(max(0.7, min(1.3, 1.0 + (3.0 - fdr) * 0.1)), 3)
+        return 1.0
+
+    def _unfdr_xp(self, player_id):
         player = self.elements.get(player_id)
         if not player:
             return 0.0
-
         xmins_factor = self.calculate_xmins(player)
         if xmins_factor == 0.0:
             return 0.0
@@ -108,7 +124,6 @@ class FPLAnalyzer:
         ep_next = self._num(player.get("ep_next"), form)
         ict_index = self._num(player.get("ict_index")) / 10.0
         selected_by = self._num(player.get("selected_by_percent"))
-
         xg = self._num(player.get("expected_goals"))
         xa = self._num(player.get("expected_assists"))
         xgi = self._num(player.get("expected_goal_involvements"), xg + xa)
@@ -131,10 +146,25 @@ class FPLAnalyzer:
             team_strength = ((def_home + def_away) / 2.0) / 1100.0
         else:
             team_strength = ((home_str + away_str) / 2.0) / 1100.0
-
         ownership_bonus = 1.0 + min(0.15, selected_by / 100.0)
-        fdr_factor = self.fixture_factor(player_id)
-        return round(max(0.0, base_score * xmins_factor * team_strength * ownership_bonus * fdr_factor), 2)
+        return max(0.0, base_score * xmins_factor * team_strength * ownership_bonus)
+
+    def horizon_xp(self, player_id, weeks=3):
+        """Sum of next N single-GW xP estimates using that week's FDR."""
+        base = self._unfdr_xp(player_id)
+        if base == 0.0:
+            return 0.0
+        gw = self.current_gw or 1
+        total = 0.0
+        for event_id in range(gw, gw + weeks):
+            total += base * self.fixture_factor_for_event(player_id, event_id)
+        return round(total, 2)
+
+    def calculate_xp(self, player_id):
+        base = self._unfdr_xp(player_id)
+        if base == 0.0:
+            return 0.0
+        return round(base * self.fixture_factor(player_id), 2)
 
     def playing_chance(self, player_id):
         player = self.elements.get(player_id) or {}
@@ -387,7 +417,7 @@ class FPLAnalyzer:
             return False
         return True
 
-    def run_llm_tactical_review(self, baseline_plan, squad_ids, overrides, gameweek=None):
+    def run_llm_tactical_review(self, baseline_plan, squad_ids, overrides, gameweek=None, ft_available=1):
         if gameweek:
             self.load_fixtures(gameweek)
 
@@ -427,8 +457,8 @@ class FPLAnalyzer:
             })
 
         prompt = f"""
-You are an expert FPL manager using xMins, ownership, and a 5-GW FDR horizon.
-Eliminate non-starting youth/fodder from the Starting XI and prefer nailed 90-minute players.
+You are an elite FPL analyst combining statistical EV, 5-GW FDR, xMins, and live press-conference intelligence.
+Free Transfers available: {ft_available} (FPL cap 5; bank unused FTs toward a mini-wildcard).
 
 SQUAD:
 {json.dumps(squad_summary, indent=2)}
@@ -442,15 +472,19 @@ BASELINE:
     "bench": baseline_plan["bench"],
     "captain": baseline_plan["captain"],
     "vice_captain": baseline_plan["vice_captain"],
+    "transfers_in": baseline_plan.get("transfers_in") or [],
+    "transfers_out": baseline_plan.get("transfers_out") or [],
+    "bank_transfer": baseline_plan.get("bank_transfer"),
+    "transfer_strategy": baseline_plan.get("transfer_strategy"),
 }, indent=2)}
 
 TACTICAL OBJECTIVES:
-1. STARTER INTEGRITY: never start fringe/youth/non-playing options (low xmins / fringe_or_youth true, e.g. Lucky, Ramsay) if a nailed midfielder or forward can start instead.
-2. FORMATION FLEXIBILITY: use 3-4-3, 3-5-2, or 4-4-2 so all 11 outfield starters are nailed 90-minute options.
-3. BENCH SAFETY: GK first, then healthy nailed subs, then doubtful/injured last.
-4. ANTI-CANNIBALIZATION: do not start defenders/GK whose opponent is a team we also start a premium attacker from.
+1. STARTER INTEGRITY & ANTI-CANNIBALIZATION: 11 nailed 90-min starters. Never start fringe/youth (Lucky, Ramsay). Never start 3 defenders against our own starting striker.
+2. PRESS CONFERENCE: use each player's news/status/chance_of_playing. Bench anyone the presser suggests is rotated, doubtful, or ruled out.
+3. FREE TRANSFER STRATEGY: only spend a transfer if a starter is long-term injured / ~0 xMins, or the move is clearly +EV. Otherwise set bank_transfer_recommendation=true to accumulate 2-5 FTs.
+4. BENCH SAFETY: GK first, healthy nailed 1st outfield sub, injured/doubtful last.
 5. Respect overrides: {json.dumps(overrides)}
-6. Use only the 15 squad IDs. Formation must be 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
+6. Use only the 15 squad IDs. Formation: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
 
 Return ONLY JSON:
 {{
@@ -458,7 +492,8 @@ Return ONLY JSON:
   "bench": [4 ids, GK first if present],
   "captain": id,
   "vice_captain": id,
-  "tactical_reasoning": "short paragraph covering formation, non-starters benched, and captaincy"
+  "bank_transfer_recommendation": true,
+  "tactical_reasoning": "short paragraph covering presser flags, formation, captaincy, and whether FTs are banked or spent"
 }}
 """
         try:
@@ -485,7 +520,37 @@ Return ONLY JSON:
                     )
                     merged["captain"] = int(tactical_result["captain"])
                     merged["vice_captain"] = int(tactical_result["vice_captain"])
-                    reasoning = tactical_result.get("tactical_reasoning") or "Gemini tactical review applied."
+                    bank_rec = bool(tactical_result.get("bank_transfer_recommendation"))
+                    merged["llm_bank_transfer"] = bank_rec
+                    reasoning = tactical_result.get("tactical_reasoning") or "Gemini press-conference review applied."
+                    if bank_rec and not merged.get("unlimited_transfers"):
+                        forced = False
+                        for out_id in merged.get("transfers_out") or []:
+                            if self.should_not_start(out_id) or self.calculate_xmins(self.elements[out_id]) == 0.0:
+                                forced = True
+                                break
+                        if not forced and (merged.get("transfers_in") or merged.get("transfers_out")):
+                            mapping = dict(zip(merged.get("transfers_in") or [], merged.get("transfers_out") or []))
+
+                            def remap(pid):
+                                return mapping.get(pid, pid)
+                            merged["starting_xi"] = [remap(pid) for pid in merged["starting_xi"]]
+                            merged["bench"] = self.order_bench([remap(pid) for pid in merged["bench"]], merged["squad_xp"])
+                            merged["captain"] = remap(merged["captain"])
+                            merged["vice_captain"] = remap(merged["vice_captain"])
+                            if merged["captain"] == merged["vice_captain"]:
+                                for pid in merged["starting_xi"]:
+                                    if pid != merged["captain"]:
+                                        merged["vice_captain"] = pid
+                                        break
+                            merged["transfers_in"] = []
+                            merged["transfers_out"] = []
+                            merged["bank_transfer"] = True
+                            merged["transfer_strategy"] = (
+                                f"Gemini press-conference review banked FTs "
+                                f"({ft_available}/5). {merged.get('transfer_strategy') or ''}"
+                            ).strip()
+                            reasoning = f"Banked transfer after press-conference review. {reasoning}"
                     return merged, reasoning
                 except Exception as exc:
                     last_error = exc

@@ -30,6 +30,8 @@ def run(mode="dry-run"):
     prev_snapshot = client.load_previous_snapshot(gw)
     manual_transfers = client.detect_manual_transfers(my_team, prev_snapshot)
 
+    ft_limit = my_team.get("transfers", {}).get("limit", 1)
+
     with open("manager_override.json", "r") as f:
         overrides = json.load(f)
 
@@ -44,13 +46,18 @@ def run(mode="dry-run"):
     if plan.get("starting_xi"):
         squad_ids = plan["starting_xi"] + plan["bench"]
     plan, tactical_reasoning = analyzer.run_llm_tactical_review(
-        plan, squad_ids, overrides, gameweek=gw
+        plan, squad_ids, overrides, gameweek=gw, ft_available=ft_limit
     )
 
     report_md = FPLReporter.generate_report(
         gw, plan, analyzer.elements, manual_transfers, is_dry_run, teams=analyzer.teams
     )
-    report_md += f"\n\n### 🧠 Tactical AI Analysis\n{tactical_reasoning}\n"
+    report_md += (
+        f"\n\n### 🧠 Tactical AI Analysis\n"
+        f"- **Free Transfers Available:** {plan.get('ft_available', ft_limit)} / 5 "
+        f"({'banked' if plan.get('bank_transfer') else 'in play'})\n"
+        f"- **Rationale:** {tactical_reasoning}\n"
+    )
 
     with open("REPORT.md", "w") as f:
         f.write(report_md)
@@ -79,7 +86,10 @@ def run(mode="dry-run"):
                     f"Transfers POST returned success but these IN players are still missing from my-team: {missing}"
                 )
         else:
-            print("No planned transfers; submitting current 15 as lineup only.")
+            if plan.get("bank_transfer"):
+                print(f"Banking FT ({ft_limit}/5). Lineup-only submit.")
+            else:
+                print("No planned transfers; submitting current 15 as lineup only.")
 
         live_ids = {p["element"] for p in my_team.get("picks", [])}
         planned_squad = list(plan["starting_xi"]) + list(plan["bench"])

@@ -271,11 +271,17 @@ class FPLClient:
             }
         return None
 
-    def get_my_team(self, current_gw=None):
+    def get_my_team(self, current_gw=None, require_auth=False):
         res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
         if res.status_code == 200:
             self.my_team = res.json()
             return self.my_team
+
+        if require_auth:
+            raise RuntimeError(
+                f"Authenticated my-team fetch failed with HTTP {res.status_code}: {(res.text or '')[:400]}. "
+                "Cannot refresh squad after transfers."
+            )
 
         public_team = self._public_team(current_gw)
         if public_team and public_team.get("picks"):
@@ -308,45 +314,157 @@ class FPLClient:
         curr_element_ids = {p["element"] for p in current_my_team.get("picks", [])}
         return list(curr_element_ids - prev_element_ids)
 
-    def submit_transfers(self, transfers_in, transfers_out, chip=None):
-        if not transfers_in or not transfers_out:
-            return True
+    def _require_write_success(self, res, action):
+        preview = (res.text or "")[:800]
+        print(f"{action} HTTP {res.status_code}: {preview}")
+        if res.status_code not in (200, 201, 204):
+            raise RuntimeError(f"{action} failed with HTTP {res.status_code}: {preview}")
+
+        content_type = (res.headers.get("Content-Type") or "").lower()
+        text = (res.text or "").lstrip()
+        if "html" in content_type or text.lower().startswith(("<!doctype", "<html")):
+            raise RuntimeError(
+                f"{action} returned a login HTML page. Session expired — refresh FPL_ACCESS_TOKEN "
+                "or FPL_EMAIL / FPL_PASSWORD."
+            )
+
+        body = self._safe_json(res)
+        if isinstance(body, dict):
+            for key in ("detail", "non_form_error", "non_form_errors", "error", "errors"):
+                value = body.get(key)
+                if value:
+                    raise RuntimeError(f"{action} rejected by FPL ({key}): {value}")
+        return body
+
+    def _transfer_payload(self, transfers_in, transfers_out, chip=None, confirmed=True):
+        if len(transfers_in) != len(transfers_out):
+            raise ValueError(
+                f"Transfer mismatch: {len(transfers_out)} out vs {len(transfers_in)} in."
+            )
+
         elements = self.get_bootstrap_data()["elements"]
         id_to_player = {p["id"]: p for p in elements}
-
-        selling = {}
-        if self.my_team:
-            selling = {
-                p["element"]: p.get("selling_price") or id_to_player[p["element"]]["now_cost"]
-                for p in self.my_team.get("picks", [])
-            }
+        live_picks = (self.my_team or {}).get("picks") or []
+        selling = {
+            p["element"]: p.get("selling_price") or id_to_player[p["element"]]["now_cost"]
+            for p in live_picks
+            if p.get("element") in id_to_player
+        }
 
         transfers_payload = []
         for out_id, in_id in zip(transfers_out, transfers_in):
+            out_id, in_id = int(out_id), int(in_id)
+            if in_id not in id_to_player:
+                raise RuntimeError(f"Unknown transfer-in player id {in_id}.")
+            if out_id not in id_to_player:
+                raise RuntimeError(f"Unknown transfer-out player id {out_id}.")
             transfers_payload.append({
                 "element_in": in_id,
                 "element_out": out_id,
-                "purchase_price": id_to_player[in_id]["now_cost"],
-                "selling_price": selling.get(out_id, id_to_player[out_id]["now_cost"]),
+                "purchase_price": int(id_to_player[in_id]["now_cost"]),
+                "selling_price": int(selling.get(out_id, id_to_player[out_id]["now_cost"])),
             })
 
-        payload = {
-            "chip": chip,
+        chip_value = chip if chip else None
+        return {
+            "confirmed": bool(confirmed),
+            "chip": chip_value,
             "entry": int(self.team_id),
-            "event": self.get_current_event()["id"],
+            "event": int(self.get_current_event()["id"]),
             "transfers": transfers_payload,
         }
-        res = self.session.post(f"{self.BASE_URL}/transfers/", json=payload, timeout=30)
-        res.raise_for_status()
-        return self._safe_json(res)
 
-    def submit_lineup(self, picks_payload):
-        payload = {"picks": picks_payload, "chip": None}
+    def submit_transfers(self, transfers_in, transfers_out, chip=None):
+        if not transfers_in or not transfers_out:
+            print("No transfers to submit.")
+            return {"status": "skipped", "reason": "empty"}
+
+        live_ids = {p["element"] for p in (self.my_team or {}).get("picks", [])}
+        pending_in, pending_out = [], []
+        for in_id, out_id in zip(transfers_in, transfers_out):
+            if in_id in live_ids and out_id not in live_ids:
+                continue
+            pending_in.append(in_id)
+            pending_out.append(out_id)
+        if not pending_in:
+            print("Planned transfers already present on the live squad; skipping transfer POST.")
+            return {"status": "skipped", "reason": "already_applied"}
+
+        headers = {
+            "Content-Type": "application/json",
+            "Referer": "https://fantasy.premierleague.com/transfers",
+        }
+        full_payload = self._transfer_payload(pending_in, pending_out, chip=chip, confirmed=True)
+        modern_payload = {k: v for k, v in full_payload.items() if k != "confirmed"}
+        print(f"Submitting transfers payload: {json.dumps(modern_payload)}")
+
         res = self.session.post(
-            f"{self.BASE_URL}/my-team/{self.team_id}/", json=payload, timeout=30
+            f"{self.BASE_URL}/transfers/", json=modern_payload, timeout=30, headers=headers
         )
-        res.raise_for_status()
-        return self._safe_json(res)
+        if res.status_code in (200, 201, 204):
+            body = self._require_write_success(res, "Transfer submit")
+            spent = int(body.get("spent_points") or 0) if isinstance(body, dict) else 0
+            if spent > 0:
+                raise RuntimeError(
+                    f"Transfers cost a {spent}-point hit unexpectedly. Check the live FPL squad."
+                )
+            return body
+
+        print(
+            f"Direct transfer POST returned HTTP {res.status_code}: {(res.text or '')[:400]}. "
+            "Retrying FPL confirmed two-step."
+        )
+        validate_payload = dict(modern_payload)
+        validate_payload["confirmed"] = False
+        validate_res = self.session.post(
+            f"{self.BASE_URL}/transfers/", json=validate_payload, timeout=30, headers=headers
+        )
+        validate_body = self._require_write_success(validate_res, "Transfer validation")
+        spent = int(validate_body.get("spent_points") or 0) if isinstance(validate_body, dict) else 0
+        if spent > 0:
+            raise RuntimeError(
+                f"Transfers would cost a {spent}-point hit. Aborting so the live squad is not changed."
+            )
+
+        confirm_payload = dict(modern_payload)
+        confirm_payload["confirmed"] = True
+        confirm_res = self.session.post(
+            f"{self.BASE_URL}/transfers/", json=confirm_payload, timeout=30, headers=headers
+        )
+        try:
+            return self._require_write_success(confirm_res, "Transfer confirm")
+        except RuntimeError as exc:
+            print(f"Transfer confirm reported an error ({exc}); checking whether the live squad already updated.")
+            live = self.get_my_team(require_auth=True)
+            live_ids = {p["element"] for p in live.get("picks", [])}
+            if all(pid in live_ids for pid in pending_in):
+                return {"status": "applied", "note": "confirm POST errored but live squad contains transferred-in players"}
+            raise
+
+    def submit_lineup(self, picks_payload, chip=None):
+        if len(picks_payload) != 15:
+            raise ValueError(f"Lineup must contain 15 picks, got {len(picks_payload)}.")
+        positions = [p.get("position") for p in picks_payload]
+        if sorted(positions) != list(range(1, 16)):
+            raise ValueError(f"Lineup positions must be 1-15 uniquely, got {positions}.")
+        captains = [p for p in picks_payload if p.get("is_captain")]
+        vices = [p for p in picks_payload if p.get("is_vice_captain")]
+        if len(captains) != 1 or len(vices) != 1 or captains[0]["element"] == vices[0]["element"]:
+            raise ValueError("Lineup must have exactly one captain and a different vice-captain.")
+
+        payload = {"picks": picks_payload, "chip": chip if chip else None}
+        headers = {
+            "Content-Type": "application/json",
+            "Referer": "https://fantasy.premierleague.com/my-team",
+        }
+        print(f"Submitting lineup payload: {json.dumps(payload)}")
+        res = self.session.post(
+            f"{self.BASE_URL}/my-team/{self.team_id}/",
+            json=payload,
+            timeout=30,
+            headers=headers,
+        )
+        return self._require_write_success(res, "Lineup submit")
 
     def get_current_event(self):
         data = self.get_bootstrap_data()

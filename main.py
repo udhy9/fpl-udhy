@@ -16,9 +16,8 @@ def run(mode="dry-run"):
         client.persist_rotated_refresh_token()
     elif not is_dry_run:
         raise RuntimeError(
-            "Authentication failed. Execute mode needs GitHub secret FPL_ACCESS_TOKEN "
-            "(the access_token cookie from fantasy.premierleague.com DevTools → Application → Cookies). "
-            "FPL_COOKIE is optional. Access tokens expire in about an hour, so copy a fresh one before execute."
+            "Authentication failed. Set GitHub secrets FPL_EMAIL and FPL_PASSWORD so Playwright can log in, "
+            "or set FPL_ACCESS_TOKEN (access_token cookie) as a fallback. FPL_TEAM_ID is required."
         )
     else:
         print("Auth unavailable; dry-run will use the public team endpoint if FPL_TEAM_ID is set.")

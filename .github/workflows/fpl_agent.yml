@@ -34,6 +34,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
+          playwright install chromium --with-deps
 
       - name: Select mode from deadline
         id: mode
@@ -82,6 +83,8 @@ jobs:
         if: steps.mode.outputs.run == 'true'
         env:
           FPL_TEAM_ID: ${{ secrets.FPL_TEAM_ID }}
+          FPL_EMAIL: ${{ secrets.FPL_EMAIL }}
+          FPL_PASSWORD: ${{ secrets.FPL_PASSWORD }}
           FPL_ACCESS_TOKEN: ${{ secrets.FPL_ACCESS_TOKEN }}
           FPL_COOKIE: ${{ secrets.FPL_COOKIE }}
         run: |

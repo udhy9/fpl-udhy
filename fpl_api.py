@@ -7,8 +7,10 @@ import requests
 class FPLClient:
     BASE_URL = "https://fantasy.premierleague.com/api"
 
-    def __init__(self, team_id=None, access_token=None, cookie=None):
+    def __init__(self, team_id=None, access_token=None, cookie=None, email=None, password=None):
         self.team_id = team_id or os.environ.get("FPL_TEAM_ID")
+        self.email = email or os.environ.get("FPL_EMAIL")
+        self.password = password or os.environ.get("FPL_PASSWORD")
         self.access_token = self._clean_token(
             access_token or os.environ.get("FPL_ACCESS_TOKEN")
         )
@@ -66,9 +68,138 @@ class FPLClient:
 
         self.session.cookies.set("pl_profile", cookie, domain=".premierleague.com")
 
+    def _import_browser_cookies(self, cookies):
+        for cookie in cookies:
+            name = cookie.get("name")
+            value = cookie.get("value")
+            if not name or value is None:
+                continue
+            domain = cookie.get("domain") or ".premierleague.com"
+            self.session.cookies.set(name, value, domain=domain)
+            if name == "access_token":
+                self._apply_access_token(value)
+
+    def login_with_playwright(self):
+        if not self.email or not self.password:
+            raise ValueError("FPL_EMAIL and FPL_PASSWORD must be set in GitHub Secrets.")
+
+        from playwright.sync_api import sync_playwright
+
+        print("Starting Playwright FPL login...")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent=self.session.headers["User-Agent"],
+                locale="en-GB",
+            )
+            page = context.new_page()
+            page.set_default_timeout(45000)
+            page.goto("https://fantasy.premierleague.com/", wait_until="domcontentloaded")
+
+            for label in ("Accept All Cookies", "Accept all", "Accept", "I Accept"):
+                try:
+                    page.get_by_role("button", name=label).click(timeout=2500)
+                    break
+                except Exception:
+                    continue
+
+            signed_in = False
+            for locator in (
+                page.get_by_role("link", name="Sign in"),
+                page.get_by_role("link", name="Log in"),
+                page.locator("a[href*='login']"),
+            ):
+                try:
+                    locator.first.click(timeout=4000)
+                    signed_in = True
+                    break
+                except Exception:
+                    continue
+            if not signed_in:
+                page.goto(
+                    "https://fantasy.premierleague.com/",
+                    wait_until="domcontentloaded",
+                )
+
+            user_box = None
+            for selector in (
+                "input[type='email']",
+                "input[name='username']",
+                "input[name='login']",
+                "input[id='username']",
+                "input[autocomplete='username']",
+            ):
+                try:
+                    page.wait_for_selector(selector, timeout=8000)
+                    user_box = selector
+                    break
+                except Exception:
+                    continue
+            if not user_box:
+                browser.close()
+                raise RuntimeError(
+                    "Playwright could not find the FPL login form. Cloudflare Turnstile "
+                    "may have blocked the GitHub Actions IP."
+                )
+
+            page.fill(user_box, self.email)
+            page.fill("input[type='password']", self.password)
+            for submit in (
+                "button[type='submit']",
+                "button:has-text('Sign in')",
+                "button:has-text('Log in')",
+                "input[type='submit']",
+            ):
+                try:
+                    page.click(submit, timeout=3000)
+                    break
+                except Exception:
+                    continue
+
+            try:
+                page.wait_for_url("**/fantasy.premierleague.com/**", timeout=60000)
+            except Exception:
+                browser.close()
+                raise RuntimeError(
+                    "Playwright login did not return to fantasy.premierleague.com. "
+                    "Turnstile/CAPTCHA likely blocked the headless browser."
+                )
+
+            token = page.evaluate(
+                """() => {
+                    try {
+                        const key = Object.keys(localStorage).find(k => k.startsWith('oidc.user:'));
+                        if (!key) return null;
+                        const data = JSON.parse(localStorage.getItem(key) || '{}');
+                        return data.access_token || null;
+                    } catch (e) {
+                        return null;
+                    }
+                }"""
+            )
+            self._import_browser_cookies(context.cookies())
+            if token:
+                self._apply_access_token(token)
+            browser.close()
+
+        if self.team_id:
+            res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
+            if res.status_code != 200:
+                raise RuntimeError(
+                    f"Playwright login finished but my-team returned {res.status_code}."
+                )
+        print("Authenticated via Playwright (FPL_EMAIL / FPL_PASSWORD).")
+        return True
+
     def login(self):
+        if self.email and self.password:
+            try:
+                return self.login_with_playwright()
+            except Exception as exc:
+                print(f"Playwright login failed: {exc}")
+
         if not self.access_token and not self.cookie:
-            print("Warning: Neither FPL_ACCESS_TOKEN nor FPL_COOKIE provided.")
+            print("Warning: No Playwright credentials and no FPL_ACCESS_TOKEN / FPL_COOKIE.")
             return False
         if not self.team_id:
             print("Warning: FPL_TEAM_ID is missing.")
@@ -153,8 +284,7 @@ class FPLClient:
 
         raise RuntimeError(
             f"Failed to fetch team data for Team ID {self.team_id}. (Status: {res.status_code}). "
-            "Update GitHub secret FPL_ACCESS_TOKEN with the access_token cookie from "
-            "fantasy.premierleague.com DevTools."
+            "Update FPL_EMAIL / FPL_PASSWORD, or FPL_ACCESS_TOKEN if Playwright login is blocked."
         )
 
     def save_state_snapshot(self, gameweek, team_data):

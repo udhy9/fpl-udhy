@@ -230,6 +230,13 @@ class FPLOptimizer:
         prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 4]) >= 1
         prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 4]) <= 3
 
+        attacking_defs = [
+            pid for pid in current_squad_ids
+            if pos_map[pid] == 2 and self.analyzer.is_attacking_or_template_def(pid)
+        ]
+        if attacking_defs:
+            prob += pulp.lpSum([start_vars[pid] for pid in attacking_defs]) >= 1
+
         for pid in current_squad_ids:
             if self._name_matches(pid, must_start) or pid in self.manual_locks:
                 if not self.analyzer.should_not_start(pid):

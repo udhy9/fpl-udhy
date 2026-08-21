@@ -62,7 +62,39 @@ class FPLAnalyzer:
             return 1.0
         if starts == 0 and minutes < 45 and selected_by < 2.0 and now_cost <= 45:
             return 0.2
-        return 0.5
+        return 0.6
+
+    def historical_baseline(self, player):
+        """Last-season / career PPG, weighted more heavily in GW1-4 when form is empty."""
+        ppg = self._num(player.get("points_per_game"))
+        total = self._num(player.get("total_points"))
+        starts = max(1.0, self._num(player.get("starts")))
+        baseline = ppg if ppg > 0 else (total / starts if total else 0.0)
+        gw = self.current_gw or 1
+        if gw <= 4:
+            weight = 0.40
+        elif gw <= 8:
+            weight = 0.20
+        else:
+            weight = 0.10
+        return baseline * weight
+
+    def attacking_defender_score(self, player):
+        threat = self._num(player.get("threat")) / 100.0
+        creativity = self._num(player.get("creativity")) / 100.0
+        xg = self._num(player.get("expected_goals"))
+        xa = self._num(player.get("expected_assists"))
+        xgi = self._num(player.get("expected_goal_involvements"), xg + xa)
+        return (threat * 1.2) + (creativity * 1.0) + (xgi * 1.5)
+
+    def is_attacking_or_template_def(self, player_id):
+        player = self.elements.get(player_id)
+        if not player or player.get("element_type") != 2:
+            return False
+        if self.should_not_start(player_id) or self.is_fringe(player_id):
+            return False
+        selected_by = self._num(player.get("selected_by_percent"))
+        return selected_by >= 8.0 or self.attacking_defender_score(player) >= 0.8
 
     def is_fringe(self, player_id):
         player = self.elements.get(player_id)
@@ -127,15 +159,17 @@ class FPLAnalyzer:
         xg = self._num(player.get("expected_goals"))
         xa = self._num(player.get("expected_assists"))
         xgi = self._num(player.get("expected_goal_involvements"), xg + xa)
+        history = self.historical_baseline(player)
 
         if pos == 1:
-            base_score = (ep_next * 0.5) + (form * 0.3) + 1.5
+            base_score = (ep_next * 0.5) + (form * 0.3) + history + 1.5
         elif pos == 2:
-            base_score = (ep_next * 0.45) + (form * 0.25) + (xgi * 0.8) + 1.0
+            attacking_potential = self.attacking_defender_score(player)
+            base_score = (ep_next * 0.40) + (form * 0.20) + attacking_potential + history + 1.0
         elif pos == 3:
-            base_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.2) + (ict_index * 0.2)
+            base_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.2) + (ict_index * 0.2) + history
         else:
-            base_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.4) + (ict_index * 0.2)
+            base_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.4) + (ict_index * 0.2) + history
 
         team = self.teams.get(player["team"], {}) or {}
         home_str = self._num(team.get("strength_overall_home"), 1100.0)
@@ -146,8 +180,10 @@ class FPLAnalyzer:
             team_strength = ((def_home + def_away) / 2.0) / 1100.0
         else:
             team_strength = ((home_str + away_str) / 2.0) / 1100.0
-        ownership_bonus = 1.0 + min(0.15, selected_by / 100.0)
-        return max(0.0, base_score * xmins_factor * team_strength * ownership_bonus)
+        ownership_weight = 1.0 + min(0.20, (selected_by / 100.0) * 0.5)
+        if pos == 2 and selected_by >= 10.0:
+            ownership_weight += 0.05
+        return max(0.0, base_score * xmins_factor * team_strength * ownership_weight)
 
     def horizon_xp(self, player_id, weeks=3):
         """Sum of next N single-GW xP estimates using that week's FDR."""
@@ -384,6 +420,31 @@ class FPLAnalyzer:
             if swapped:
                 continue
 
+        has_attacking_def = any(
+            self.is_attacking_or_template_def(pid) for pid in starting if self._pos(pid) == 2
+        )
+        if not has_attacking_def:
+            bench_defs = [
+                bid for bid in bench
+                if self.is_attacking_or_template_def(bid)
+            ]
+            weak_defs = [
+                pid for pid in starting
+                if self._pos(pid) == 2 and not self.is_attacking_or_template_def(pid)
+            ]
+            weak_defs.sort(key=lambda pid: xp.get(pid, 0.0))
+            bench_defs.sort(key=lambda pid: xp.get(pid, 0.0), reverse=True)
+            if bench_defs and weak_defs:
+                swap_in, swap_out = bench_defs[0], weak_defs[0]
+                starting.remove(swap_out)
+                starting.append(swap_in)
+                bench.remove(swap_in)
+                bench.append(swap_out)
+                notes.append(
+                    f"Started attacking/template defender {self.elements[swap_in]['web_name']}; "
+                    f"benched {self.elements[swap_out]['web_name']}."
+                )
+
         starting.sort(key=lambda pid: (self._pos(pid), -xp.get(pid, 0)))
         bench = self.order_bench(bench, xp)
 
@@ -442,6 +503,9 @@ class FPLAnalyzer:
                 "selected_by_%": player.get("selected_by_percent"),
                 "xmins": self.calculate_xmins(player),
                 "fringe_or_youth": self.is_fringe(pid),
+                "threat": player.get("threat"),
+                "creativity": player.get("creativity"),
+                "attacking_or_template_def": self.is_attacking_or_template_def(pid),
                 "baseline_xp": baseline_plan["squad_xp"].get(pid, 0.0),
             })
 
@@ -479,12 +543,13 @@ BASELINE:
 }, indent=2)}
 
 TACTICAL OBJECTIVES:
-1. STARTER INTEGRITY & ANTI-CANNIBALIZATION: 11 nailed 90-min starters. Never start fringe/youth (Lucky, Ramsay). Never start 3 defenders against our own starting striker.
-2. PRESS CONFERENCE: use each player's news/status/chance_of_playing. Bench anyone the presser suggests is rotated, doubtful, or ruled out.
-3. FREE TRANSFER STRATEGY: only spend a transfer if a starter is long-term injured / ~0 xMins, or the move is clearly +EV. Otherwise set bank_transfer_recommendation=true to accumulate 2-5 FTs.
-4. BENCH SAFETY: GK first, healthy nailed 1st outfield sub, injured/doubtful last.
-5. Respect overrides: {json.dumps(overrides)}
-6. Use only the 15 squad IDs. Formation: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
+1. DEFENSE COMPOSITION: start at least one attacking/high-ownership defender (threat/creativity/xGI or template ownership). Do not start fringe bench defenders if a nailed mid/fwd has a higher ceiling.
+2. STARTER INTEGRITY & ANTI-CANNIBALIZATION: 11 nailed 90-min starters. Never start fringe/youth (Lucky, Ramsay). Never start 3 defenders against our own starting striker.
+3. PRESS CONFERENCE: use each player's news/status/chance_of_playing. Bench anyone the presser suggests is rotated, doubtful, or ruled out.
+4. FREE TRANSFER STRATEGY: only spend a transfer if a starter is long-term injured / ~0 xMins, or the move is clearly +EV. Otherwise set bank_transfer_recommendation=true to accumulate 2-5 FTs.
+5. BENCH SAFETY: GK first, healthy nailed 1st outfield sub, injured/doubtful last.
+6. Respect overrides: {json.dumps(overrides)}
+7. Use only the 15 squad IDs. Formation: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD.
 
 Return ONLY JSON:
 {{

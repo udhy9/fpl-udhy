@@ -35,6 +35,7 @@ class FPLAnalyzer:
         """Expected-minutes / starting-likelihood multiplier in [0.0, 1.0]."""
         status = player.get("status")
         chance = player.get("chance_of_playing_next_round")
+        pos = player.get("element_type")
         if status in ("i", "s", "u"):
             return 0.0
         if chance is not None:
@@ -52,8 +53,14 @@ class FPLAnalyzer:
         now_cost = int(self._num(player.get("now_cost")))
         gw_num = self.current_gw or 1
 
-        if player.get("element_type") == 1 and not self.is_likely_starting_gk(player["id"]):
-            return 0.15
+        if pos == 1:
+            if not self.is_likely_starting_gk(player["id"]):
+                return 0.0
+            if gw_num > 2 and starts == 0 and minutes == 0:
+                return 0.0
+            if selected_by < 1.0 and starts == 0:
+                return 0.2
+            return 1.0
 
         if gw_num > 2 and starts == 0 and minutes < 45:
             return 0.15
@@ -63,6 +70,14 @@ class FPLAnalyzer:
         if starts == 0 and minutes < 45 and selected_by < 2.0 and now_cost <= 45:
             return 0.2
         return 0.6
+
+    def is_confirmed_starting_gk(self, player_id):
+        player = self.elements.get(player_id)
+        if not player or player.get("element_type") != 1:
+            return False
+        if self.should_not_start(player_id):
+            return False
+        return self.is_likely_starting_gk(player_id) and self.calculate_xmins(player) >= 1.0
 
     def historical_baseline(self, player):
         """Last-season / career PPG, weighted more heavily in GW1-4 when form is empty."""
@@ -443,6 +458,26 @@ class FPLAnalyzer:
                 notes.append(
                     f"Started attacking/template defender {self.elements[swap_in]['web_name']}; "
                     f"benched {self.elements[swap_out]['web_name']}."
+                )
+
+        start_gks = [pid for pid in starting if self._pos(pid) == 1]
+        bench_gks = [pid for pid in bench if self._pos(pid) == 1]
+        if start_gks and bench_gks:
+            start_gk, bench_gk = start_gks[0], bench_gks[0]
+            swap_gk = False
+            if self.is_confirmed_starting_gk(bench_gk) and not self.is_confirmed_starting_gk(start_gk):
+                swap_gk = True
+            elif self.is_confirmed_starting_gk(start_gk) and self.is_confirmed_starting_gk(bench_gk):
+                if self.fixture_factor(bench_gk) > self.fixture_factor(start_gk) + 0.02:
+                    swap_gk = True
+            if swap_gk:
+                starting.remove(start_gk)
+                starting.append(bench_gk)
+                bench.remove(bench_gk)
+                bench.append(start_gk)
+                notes.append(
+                    f"Started first-choice GK {self.elements[bench_gk]['web_name']} "
+                    f"(easier CS / confirmed starter); benched {self.elements[start_gk]['web_name']}."
                 )
 
         starting.sort(key=lambda pid: (self._pos(pid), -xp.get(pid, 0)))

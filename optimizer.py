@@ -237,6 +237,23 @@ class FPLOptimizer:
         if attacking_defs:
             prob += pulp.lpSum([start_vars[pid] for pid in attacking_defs]) >= 1
 
+        gks = [pid for pid in current_squad_ids if pos_map[pid] == 1]
+        startable_gks = [
+            pid for pid in gks
+            if squad_xp.get(pid, 0.0) > 0.0 and self.analyzer.is_confirmed_starting_gk(pid)
+        ]
+        if not startable_gks:
+            startable_gks = [
+                pid for pid in gks
+                if squad_xp.get(pid, 0.0) > 0.0
+                and self.elements[pid].get("status") not in ("i", "s", "u")
+            ]
+        for pid in gks:
+            injured = self.elements[pid].get("status") in ("i", "s", "u")
+            if injured or squad_xp.get(pid, 0.0) <= 0.0 or (startable_gks and pid not in startable_gks):
+                if startable_gks or any(squad_xp.get(other, 0.0) > 0.0 for other in gks if other != pid):
+                    prob += start_vars[pid] == 0
+
         for pid in current_squad_ids:
             if self._name_matches(pid, must_start) or pid in self.manual_locks:
                 if not self.analyzer.should_not_start(pid):
@@ -262,6 +279,17 @@ class FPLOptimizer:
             prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 3]) <= 5
             prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 4]) >= 1
             prob += pulp.lpSum([start_vars[pid] for pid in current_squad_ids if pos_map[pid] == 4]) <= 3
+            fallback_gks = [pid for pid in current_squad_ids if pos_map[pid] == 1]
+            fallback_startable = [
+                pid for pid in fallback_gks
+                if squad_xp.get(pid, 0.0) > 0.0 and self.analyzer.is_confirmed_starting_gk(pid)
+            ]
+            for pid in fallback_gks:
+                if squad_xp.get(pid, 0.0) <= 0.0 or self.elements[pid].get("status") in ("i", "s", "u"):
+                    if fallback_startable or any(
+                        squad_xp.get(other, 0.0) > 0.0 for other in fallback_gks if other != pid
+                    ):
+                        prob += start_vars[pid] == 0
             for pid in current_squad_ids:
                 if self._name_matches(pid, must_start) or pid in self.manual_locks:
                     prob += start_vars[pid] == 1

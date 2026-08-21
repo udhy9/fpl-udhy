@@ -16,10 +16,12 @@ class FPLAnalyzer:
         self.current_gw = self._infer_gameweek()
         self.fixture_horizon = 5
         self.fixture_multipliers = {}
+        self.fixture_matrix = {}
         self.historical_points = {}
         self.overall_rank = None
         self.SET1_LAST_GW = 19
         self.SET2_FIRST_GW = 20
+        self.FORM_ALPHA = 0.85
 
     @staticmethod
     def _num(value, default=0.0):
@@ -160,6 +162,71 @@ class FPLAnalyzer:
             return 1.25
         return 1.0
 
+    def exponential_form(self, player):
+        """EWMA in-season form: newest signal is ep_next, older form decays at alpha=0.85."""
+        form = self._num(player.get("form"))
+        ep_next = self._num(player.get("ep_next"), form)
+        alpha = self.FORM_ALPHA
+        return (ep_next + alpha * form) / (1.0 + alpha)
+
+    def set_piece_bonus(self, player):
+        """Primary penalty / FK / corner takers get forward-looking xP."""
+        pen = player.get("penalties_order")
+        fk = player.get("direct_freekicks_order")
+        corner = player.get("corners_and_indirect_freekicks_order")
+        bonus = 0.0
+        if pen == 1:
+            bonus += 0.85
+        elif pen == 2:
+            bonus += 0.25
+        if fk == 1 and corner == 1:
+            bonus += 0.50
+        elif fk == 1 or corner == 1:
+            bonus += 0.40
+        return bonus
+
+    def np_xgi(self, player):
+        """Non-penalty xGI: official xGI with estimated penalty xG stripped for designated takers."""
+        xg = self._num(player.get("expected_goals"))
+        xa = self._num(player.get("expected_assists"))
+        xgi = self._num(player.get("expected_goal_involvements"), xg + xa)
+        np_xg_field = player.get("expected_goals_without_penalties")
+        if np_xg_field not in (None, ""):
+            return max(0.0, self._num(np_xg_field) + xa)
+        pen = player.get("penalties_order")
+        np_xg = xg
+        if pen == 1:
+            np_xg = max(0.0, xg * 0.82)
+        elif pen == 2:
+            np_xg = max(0.0, xg * 0.95)
+        return max(0.0, xgi - xg + np_xg)
+
+    def defensive_bps_cbi_anchor(self, player):
+        """Possession-side CBs who rack BPS / CBI (or FPL DC) get a clean-sheet bonus-points floor."""
+        team = self.teams.get(player.get("team"), {}) or {}
+        minutes = self._num(player.get("minutes"))
+        bps = self._num(player.get("bps"))
+        cbi = self._num(player.get("clearances_blocks_interceptions"))
+        dc = self._num(player.get("defensive_contribution"))
+        influence = self._num(player.get("influence"))
+        possession_side = self._num(team.get("strength_overall_home"), 1100.0) >= 1200.0
+
+        cbi_p90 = 0.0
+        bps_p90 = 0.0
+        if minutes >= 90:
+            volume = cbi if cbi > 0 else dc
+            if volume > 0:
+                cbi_p90 = volume / minutes * 90.0
+            elif influence > 0:
+                cbi_p90 = influence / minutes * 9.0
+            bps_p90 = bps / minutes * 90.0
+
+        if cbi_p90 >= 8.0 or bps_p90 >= 22.0:
+            return 0.85 if possession_side else 0.50
+        if possession_side:
+            return 0.60
+        return 0.20
+
     def load_historical_priors(self):
         """Load previous-season totals (Vaastav FPL dataset) keyed to current player IDs."""
         self.historical_points = {}
@@ -203,10 +270,19 @@ class FPLAnalyzer:
         print(f"Mapped last-season totals for {len(self.historical_points)} players.")
         return self.historical_points
 
-    def get_fixture_multipliers(self, current_gw=None):
-        """DGW multiplier >= 2, BGW multiplier 0, otherwise 1."""
+    def get_fixture_matrix(self, current_gw=None):
+        """Per-team attacking vs defensive opponent strengths for a GW (averages DGW opponents)."""
         gw = int(current_gw or self.current_gw or 1)
-        counts = {tid: 0 for tid in self.teams}
+        matrix = {
+            tid: {
+                "count": 0,
+                "opp_atk_strength": 0.0,
+                "opp_def_strength": 0.0,
+                "is_home": True,
+                "home_games": 0,
+            }
+            for tid in self.teams
+        }
         event_fixtures = [fx for fx in (self.fixtures or []) if fx.get("event") == gw]
         if not event_fixtures:
             try:
@@ -217,23 +293,68 @@ class FPLAnalyzer:
                 )
                 if res.status_code == 200:
                     event_fixtures = res.json() or []
+                    if event_fixtures:
+                        self.fixtures = list(self.fixtures or []) + [
+                            fx for fx in event_fixtures
+                            if fx not in (self.fixtures or [])
+                        ]
             except Exception as exc:
                 print(f"DGW/BGW fixture fetch failed: {exc}")
+                self.fixture_matrix = {
+                    tid: {"count": 1, "opp_atk_strength": 1100.0, "opp_def_strength": 1100.0, "is_home": True}
+                    for tid in self.teams
+                }
                 self.fixture_multipliers = {tid: 1 for tid in self.teams}
-                return self.fixture_multipliers
+                return self.fixture_matrix
 
         for fx in event_fixtures:
             home, away = fx.get("team_h"), fx.get("team_a")
-            if home in counts:
-                counts[home] += 1
-            if away in counts:
-                counts[away] += 1
-        self.fixture_multipliers = counts
-        doubles = sum(1 for n in counts.values() if n >= 2)
-        blanks = sum(1 for n in counts.values() if n == 0)
+            if home in matrix:
+                away_team = self.teams.get(away, {}) or {}
+                matrix[home]["count"] += 1
+                matrix[home]["home_games"] += 1
+                matrix[home]["opp_atk_strength"] += self._num(away_team.get("strength_attack_away"), 1100.0)
+                matrix[home]["opp_def_strength"] += self._num(away_team.get("strength_defence_away"), 1100.0)
+            if away in matrix:
+                home_team = self.teams.get(home, {}) or {}
+                matrix[away]["count"] += 1
+                matrix[away]["opp_atk_strength"] += self._num(home_team.get("strength_attack_home"), 1100.0)
+                matrix[away]["opp_def_strength"] += self._num(home_team.get("strength_defence_home"), 1100.0)
+
+        for tid, row in matrix.items():
+            n = row["count"]
+            if n > 0:
+                row["opp_atk_strength"] /= n
+                row["opp_def_strength"] /= n
+                row["is_home"] = row["home_games"] >= (n / 2.0)
+            else:
+                row["opp_atk_strength"] = 1100.0
+                row["opp_def_strength"] = 1100.0
+                row["is_home"] = True
+
+        self.fixture_matrix = matrix
+        self.fixture_multipliers = {tid: int(row["count"]) for tid, row in matrix.items()}
+        doubles = sum(1 for n in self.fixture_multipliers.values() if n >= 2)
+        blanks = sum(1 for n in self.fixture_multipliers.values() if n == 0)
         if doubles or blanks:
             print(f"GW {gw} fixture multipliers: {doubles} DGW teams, {blanks} BGW teams.")
+        return self.fixture_matrix
+
+    def get_fixture_multipliers(self, current_gw=None):
+        """DGW multiplier >= 2, BGW multiplier 0, otherwise 1."""
+        self.get_fixture_matrix(current_gw)
         return self.fixture_multipliers
+
+    def _count_from_mult_map(self, multipliers, team_id, default=1):
+        if not multipliers:
+            return default
+        val = multipliers.get(team_id, default)
+        if isinstance(val, dict):
+            return int(val.get("count", default))
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return default
 
     def team_gw_multiplier(self, team_id, event_id=None):
         event_id = event_id or self.current_gw
@@ -263,7 +384,7 @@ class FPLAnalyzer:
                 continue
             if self.should_not_start(pid):
                 injured_starters += 1
-            mult = multipliers.get(player["team"], 1) if multipliers else 1
+            mult = self._count_from_mult_map(multipliers, player["team"], 1) if multipliers else 1
             if mult >= 2:
                 dgw_players += 1
                 best_dgw_xp = max(best_dgw_xp, self.calculate_xp(pid))
@@ -316,10 +437,8 @@ class FPLAnalyzer:
     def attacking_defender_score(self, player):
         threat = self._num(player.get("threat")) / 100.0
         creativity = self._num(player.get("creativity")) / 100.0
-        xg = self._num(player.get("expected_goals"))
-        xa = self._num(player.get("expected_assists"))
-        xgi = self._num(player.get("expected_goal_involvements"), xg + xa)
-        return (threat * 1.2) + (creativity * 1.0) + (xgi * 1.5)
+        np_xgi = self.np_xgi(player)
+        return (threat * 1.3) + (creativity * 1.1) + (np_xgi * 1.4) + (self.set_piece_bonus(player) * 0.5)
 
     def is_attacking_or_template_def(self, player_id):
         player = self.elements.get(player_id)
@@ -336,46 +455,78 @@ class FPLAnalyzer:
             return True
         return self.calculate_xmins(player) < 0.4
 
+    def team_matchup_for_event(self, team_id, event_id):
+        """Attacking matchup (our ATK vs opp DEF) and clean-sheet matchup (our DEF vs opp ATK)."""
+        team = self.teams.get(team_id, {}) or {}
+        atk_ratios = []
+        def_ratios = []
+        count = 0
+        for fx in self.fixtures or []:
+            if fx.get("event") != event_id or fx.get("finished"):
+                continue
+            if fx.get("team_h") == team_id:
+                opp = self.teams.get(fx.get("team_a"), {}) or {}
+                team_atk = self._num(team.get("strength_attack_home"), 1100.0)
+                team_def = self._num(team.get("strength_defence_home"), 1100.0)
+                opp_atk = self._num(opp.get("strength_attack_away"), 1100.0)
+                opp_def = self._num(opp.get("strength_defence_away"), 1100.0)
+            elif fx.get("team_a") == team_id:
+                opp = self.teams.get(fx.get("team_h"), {}) or {}
+                team_atk = self._num(team.get("strength_attack_away"), 1100.0)
+                team_def = self._num(team.get("strength_defence_away"), 1100.0)
+                opp_atk = self._num(opp.get("strength_attack_home"), 1100.0)
+                opp_def = self._num(opp.get("strength_defence_home"), 1100.0)
+            else:
+                continue
+            count += 1
+            atk_ratios.append(team_atk / max(800.0, opp_def))
+            def_ratios.append(team_def / max(800.0, opp_atk))
+        if count == 0:
+            return {"count": 0, "atk_matchup": 1.0, "def_matchup": 1.0}
+        return {
+            "count": count,
+            "atk_matchup": sum(atk_ratios) / len(atk_ratios),
+            "def_matchup": sum(def_ratios) / len(def_ratios),
+        }
+
+    def position_matchup_factor(self, player_id, event_id=None):
+        """Dual FDR: GK/DEF lean on clean-sheet odds; MID/FWD and attacking DEF keep offensive matchup."""
+        player = self.elements.get(player_id)
+        if not player:
+            return 1.0
+        event_id = event_id or self.current_gw
+        matchup = self.team_matchup_for_event(player["team"], event_id)
+        if matchup["count"] == 0:
+            if self.fixtures:
+                return 0.35
+            return 1.0
+        atk = max(0.7, min(1.45, matchup["atk_matchup"]))
+        defence = max(0.7, min(1.45, matchup["def_matchup"]))
+        pos = player.get("element_type")
+        if pos == 1:
+            return 0.25 + 0.75 * defence
+        if pos == 2:
+            return 0.15 + 0.40 * atk + 0.45 * defence
+        if pos == 3:
+            return 0.20 + 0.70 * atk + 0.10 * defence
+        return 0.15 + 0.85 * atk
+
     def fixture_factor(self, player_id, horizon=None):
-        """Rolling FDR multiplier for the next N gameweeks. Easier run → higher factor."""
+        """Rolling dual attack/CS matchup over the next N gameweeks."""
         horizon = horizon or self.fixture_horizon
         player = self.elements.get(player_id)
         if not player or not self.fixtures:
             return 1.0
-        team_id = player["team"]
         gw = self.current_gw or 1
-        fdrs = []
-        for fx in self.fixtures:
-            event = fx.get("event")
-            if event is None or event < gw or event >= gw + horizon:
-                continue
-            if fx.get("finished"):
-                continue
-            if fx.get("team_h") == team_id:
-                fdrs.append(self._num(fx.get("team_h_difficulty"), 3.0))
-            elif fx.get("team_a") == team_id:
-                fdrs.append(self._num(fx.get("team_a_difficulty"), 3.0))
-        if not fdrs:
+        factors = []
+        for event_id in range(gw, gw + horizon):
+            factors.append(self.position_matchup_factor(player_id, event_id))
+        if not factors:
             return 1.0
-        avg_fdr = sum(fdrs) / len(fdrs)
-        return round(max(0.7, min(1.3, 1.0 + (3.0 - avg_fdr) * 0.1)), 3)
+        return round(sum(factors) / len(factors), 3)
 
     def fixture_factor_for_event(self, player_id, event_id):
-        player = self.elements.get(player_id)
-        if not player or not self.fixtures:
-            return 1.0
-        team_id = player["team"]
-        for fx in self.fixtures:
-            if fx.get("event") != event_id or fx.get("finished"):
-                continue
-            if fx.get("team_h") == team_id:
-                fdr = self._num(fx.get("team_h_difficulty"), 3.0)
-            elif fx.get("team_a") == team_id:
-                fdr = self._num(fx.get("team_a_difficulty"), 3.0)
-            else:
-                continue
-            return round(max(0.7, min(1.3, 1.0 + (3.0 - fdr) * 0.1)), 3)
-        return 1.0
+        return round(self.position_matchup_factor(player_id, event_id), 3)
 
     def _unfdr_xp(self, player_id):
         player = self.elements.get(player_id)
@@ -388,21 +539,22 @@ class FPLAnalyzer:
         pos = player["element_type"]
         form = self._num(player.get("form"))
         ep_next = self._num(player.get("ep_next"), form)
+        decayed_form = self.exponential_form(player)
         ict_index = self._num(player.get("ict_index")) / 10.0
         selected_by = self._num(player.get("selected_by_percent"))
-        xg = self._num(player.get("expected_goals"))
-        xa = self._num(player.get("expected_assists"))
-        xgi = self._num(player.get("expected_goal_involvements"), xg + xa)
+        np_xgi = self.np_xgi(player)
+        set_piece = self.set_piece_bonus(player)
 
         if pos == 1:
-            in_season_score = (ep_next * 0.5) + (form * 0.3) + 1.5
+            in_season_score = (decayed_form * 0.45) + (ep_next * 0.25) + 1.5
         elif pos == 2:
             attacking_potential = self.attacking_defender_score(player)
-            in_season_score = (ep_next * 0.40) + (form * 0.20) + attacking_potential + 1.0
+            cbi_anchor = self.defensive_bps_cbi_anchor(player)
+            in_season_score = (ep_next * 0.35) + (decayed_form * 0.15) + attacking_potential + cbi_anchor
         elif pos == 3:
-            in_season_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.2) + (ict_index * 0.2)
+            in_season_score = (ep_next * 0.35) + (decayed_form * 0.20) + (np_xgi * 1.5) + set_piece + (ict_index * 0.15)
         else:
-            in_season_score = (ep_next * 0.4) + (form * 0.25) + (xgi * 1.4) + (ict_index * 0.2)
+            in_season_score = (ep_next * 0.35) + (decayed_form * 0.20) + (np_xgi * 1.7) + (set_piece * 1.2) + (ict_index * 0.15)
 
         hist_weight = self.decay_hist_weight()
         hist_prior = self.historical_ppm(player)
@@ -410,18 +562,9 @@ class FPLAnalyzer:
             hist_prior = in_season_score
         blended_base = ((1.0 - hist_weight) * in_season_score) + (hist_weight * hist_prior)
 
-        team = self.teams.get(player["team"], {}) or {}
-        home_str = self._num(team.get("strength_overall_home"), 1100.0)
-        away_str = self._num(team.get("strength_overall_away"), 1100.0)
-        def_home = self._num(team.get("strength_defence_home"), 1100.0)
-        def_away = self._num(team.get("strength_defence_away"), 1100.0)
-        if pos in (1, 2):
-            team_strength = ((def_home + def_away) / 2.0) / 1100.0
-        else:
-            team_strength = ((home_str + away_str) / 2.0) / 1100.0
         ownership_weight = self._ownership_bonus(selected_by, pos)
-        momentum_mult = self._momentum_multiplier(player, form, xgi)
-        return max(0.0, blended_base * xmins_factor * team_strength * ownership_weight * momentum_mult)
+        momentum_mult = self._momentum_multiplier(player, form, np_xgi)
+        return max(0.0, blended_base * xmins_factor * ownership_weight * momentum_mult)
 
     def horizon_xp(self, player_id, weeks=3):
         """Sum of next N single-GW xP estimates using that week's FDR."""

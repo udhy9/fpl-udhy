@@ -2,8 +2,8 @@
 **Status:** `EXECUTED (Applied to FPL Server)`
 
 ### 🎖️ Captaincy
-- **Captain (C):** **Haaland** (xP: 0.14)
-- **Vice-Captain (VC):** **B.Fernandes** (xP: 0.1)
+- **Captain (C):** **B.Fernandes** (xP: 22.22)
+- **Vice-Captain (VC):** **Thiago** (xP: 17.51)
 
 ### ♻️ Transfer Window
 - GW1/unlimited free transfers. Wildcard chip is **not** played.
@@ -25,36 +25,40 @@
 ### 🔄 Planned Transfers
 | Out | In |
 | :--- | :--- |
-| Walton | **Tzolakis** |
-| Bindon | **Amass** |
-| Cherki | **Szoboszlai** |
-| Amad | **Semenyo** |
-| Thiago | **Calvert-Lewin** |
+| Tzolakis | **Petrović** |
+| McNally | **Verbruggen** |
+| A.García | **F.Kadıoğlu** |
+| Byfield | **Muñoz** |
+| Souza | **O'Reilly** |
+| Rowswell | **N.Williams** |
+| Amass | **Pedro Porro** |
+| Haaland | **Thiago** |
 
 ### 🟢 Starting XI
 | Pos | Player | Team | Projected xP | xP/£ |
 | :--- | :--- | :--- | :--- | :--- |
-| GK | Tzolakis | HUL | 0.0 | 0.0 |
-| DEF | A.García | AVL | 0.0 | 0.0 |
-| DEF | Byfield | TOT | 0.0 | 0.0 |
-| DEF | Souza | TOT | 0.0 | 0.0 |
-| MID | B.Fernandes **(VC)** | MUN | 0.1 | 0.01 |
-| MID | Mbeumo | MUN | 0.07 | 0.01 |
-| MID | Semenyo | MCI | 0.07 | 0.01 |
-| MID | Enzo | CHE | 0.06 | 0.01 |
-| MID | Szoboszlai | LIV | 0.06 | 0.01 |
-| FWD | Haaland **(C)** | MCI | 0.14 | 0.01 |
-| FWD | João Pedro | CHE | 0.07 | 0.01 |
+| GK | Verbruggen | BHA | 2.56 | 0.57 |
+| DEF | O'Reilly | MCI | 13.17 | 2.03 |
+| DEF | Muñoz | CRY | 9.24 | 1.68 |
+| DEF | F.Kadıoğlu | BHA | 7.64 | 1.7 |
+| MID | B.Fernandes **(C)** | MUN | 22.22 | 1.85 |
+| MID | Mbeumo | MUN | 15.57 | 1.95 |
+| MID | Enzo | CHE | 14.16 | 2.02 |
+| MID | Semenyo | MCI | 14.0 | 1.65 |
+| FWD | Thiago **(VC)** | BRE | 17.51 | 2.19 |
+| FWD | João Pedro | CHE | 15.36 | 2.05 |
+| FWD | Calvert-Lewin | LEE | 14.17 | 2.36 |
 
 ### 🪑 Bench Order
-1. **McNally** (GK) - xP: 0.0
-2. **Calvert-Lewin** (FWD) - xP: 0.04
-3. **Rowswell** (DEF) - xP: 0.0
-4. **Amass** (DEF) - xP: 0.0
+1. **Petrović** (GK) - xP: 2.25
+2. **Szoboszlai** (MID) - xP: 12.85
+3. **Pedro Porro** (DEF) - xP: 10.82
+4. **N.Williams** (DEF) - xP: 10.08
 
 *Auto-generated at EXECUTED (Applied to FPL Server) window.*
 
 ### 🧠 Tactical AI Analysis
+- **Target GW Deadline:** 2026-08-21T17:30:00Z (235.7 min remaining)
 - **Free Transfers Available:** 0 / 5 (in play)
 - **Automated Chip Strategy:** `None (standard gameweek)`
-- **Rationale:** Quantitative xMins optimization applied. Benched McNally to avoid CS cannibalization vs our attackers; started Tzolakis. Benched fringe Amass (low xMins); started nailed Souza.
+- **Rationale:** Quantitative xMins optimization applied. Benched Pedro Porro to avoid CS cannibalization vs our attackers; started Muñoz. Benched N.Williams to avoid CS cannibalization vs our attackers; started F.Kadıoğlu.

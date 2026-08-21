@@ -4,12 +4,10 @@ import os
 from datetime import datetime, timezone
 
 from fpl_api import FPLClient
-from analyzer import FPLAnalyzer
-from optimizer import FPLOptimizer
-from reporter import FPLReporter
 
-DRY_RUN_WINDOW_MAX = 90
+SCHEDULE_FILE = "data/schedule.json"
 EXECUTE_WINDOW_MAX = 75
+EXECUTE_WINDOW_MIN = 15
 
 
 def _parse_deadline(deadline_str):
@@ -47,14 +45,26 @@ def check_deadline_window(bootstrap_data):
 
 
 def decide_scheduled_mode(minutes_remaining):
-    """T-90 dry-run preview, T-75 execute (prefers T-60). None means skip to save Actions minutes."""
-    if minutes_remaining < 0:
+    """Scheduled cron submits once inside T-75 to T-15. None means fast-exit."""
+    if minutes_remaining < EXECUTE_WINDOW_MIN:
         return None
-    if minutes_remaining <= EXECUTE_WINDOW_MAX:
-        return "execute"
-    if minutes_remaining <= DRY_RUN_WINDOW_MAX:
-        return "dry-run"
-    return None
+    if minutes_remaining > EXECUTE_WINDOW_MAX:
+        return None
+    return "execute"
+
+
+def load_schedule_state():
+    if os.path.exists(SCHEDULE_FILE):
+        try:
+            with open(SCHEDULE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_schedule_state(next_event, deadline_str, minutes_to_deadline, executed, mode=None, skipped=False):
+    save_schedule_log(next_event, deadline_str, minutes_to_deadline, executed, mode=mode, skipped=skipped)
 
 
 def save_schedule_log(next_event, deadline_str, minutes_to_deadline, executed, mode=None, skipped=False):
@@ -69,7 +79,7 @@ def save_schedule_log(next_event, deadline_str, minutes_to_deadline, executed, m
         "mode": mode,
         "skipped": skipped,
     }
-    with open("data/schedule.json", "w") as f:
+    with open(SCHEDULE_FILE, "w") as f:
         json.dump(schedule_data, f, indent=2)
     print(f"Wrote data/schedule.json (skipped={skipped}, executed={executed}).")
 
@@ -83,42 +93,93 @@ def _write_github_output(**kwargs):
             f.write(f"{key}={value}\n")
 
 
+def _fast_exit(next_event, deadline_str, minutes_remaining, executed, mode, reason):
+    print(reason)
+    save_schedule_log(
+        next_event, deadline_str, minutes_remaining, executed=executed, mode=mode, skipped=True
+    )
+    _write_github_output(run="false", mode=mode or "dry-run")
+
+
 def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
     client = FPLClient()
     bootstrap = client.get_bootstrap_data()
     next_event, minutes_remaining, deadline_str = check_deadline_window(bootstrap)
     if not next_event:
-        raise RuntimeError("No active gameweek found")
-
-    print(f"Next Gameweek: {next_event.get('name')} | Deadline (UTC): {deadline_str}")
-    print(f"Time remaining: {minutes_remaining:.1f} minutes")
-
-    decided_mode = mode
-    if scheduled and not force:
-        decided_mode = decide_scheduled_mode(minutes_remaining)
-        if decided_mode is None:
-            print("Outside the T-90 dry-run / T-60 execute window. Exiting early to conserve Actions minutes.")
-            save_schedule_log(
-                next_event, deadline_str, minutes_remaining, executed=False, mode=mode, skipped=True
-            )
-            _write_github_output(run="false", mode="dry-run")
-            return
-        print(f"Scheduled deadline window selected mode={decided_mode}.")
-
-    if not force and decided_mode == "execute" and minutes_remaining > EXECUTE_WINDOW_MAX:
-        print("Execute is gated to the T-75 window (prefers T-60). Exiting early. Pass --force to override.")
-        save_schedule_log(
-            next_event, deadline_str, minutes_remaining, executed=False, mode="execute", skipped=True
-        )
-        _write_github_output(run="false", mode="execute")
+        print("No active Gameweek found. Exiting.")
+        _write_github_output(run="false", mode="dry-run")
         return
+
+    prev_state = load_schedule_state()
+    already_executed_for_gw = (
+        prev_state.get("target_gameweek") == next_event["id"]
+        and prev_state.get("execution_completed") is True
+    )
+    now_label = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    print(
+        f"[{now_label}] Target: {next_event.get('name')} | Deadline: {deadline_str} | "
+        f"Countdown: {minutes_remaining:.1f}m | already_executed={already_executed_for_gw}"
+    )
+
+    decided_mode = "execute" if scheduled and not force else mode
+
+    if not force:
+        if minutes_remaining > EXECUTE_WINDOW_MAX and (scheduled or decided_mode == "execute"):
+            _fast_exit(
+                next_event,
+                deadline_str,
+                minutes_remaining,
+                already_executed_for_gw,
+                decided_mode,
+                "Outside target window (T-75m to T-15m). Fast exit to conserve runtime.",
+            )
+            return
+        if minutes_remaining < 0:
+            _fast_exit(
+                next_event,
+                deadline_str,
+                minutes_remaining,
+                False,
+                decided_mode,
+                "Gameweek deadline has passed. Awaiting next round.",
+            )
+            return
+        if decided_mode == "execute" and minutes_remaining < EXECUTE_WINDOW_MIN:
+            _fast_exit(
+                next_event,
+                deadline_str,
+                minutes_remaining,
+                already_executed_for_gw,
+                decided_mode,
+                "Inside T-15m. Too close to deadline to start a full execute.",
+            )
+            return
+        if already_executed_for_gw and decided_mode == "execute":
+            _fast_exit(
+                next_event,
+                deadline_str,
+                minutes_remaining,
+                True,
+                "execute",
+                f"Team already submitted for {next_event.get('name')}. Skipping duplicate execution.",
+            )
+            return
 
     _write_github_output(run="true", mode=decided_mode)
     save_schedule_log(
-        next_event, deadline_str, minutes_remaining, executed=False, mode=decided_mode, skipped=False
+        next_event,
+        deadline_str,
+        minutes_remaining,
+        executed=already_executed_for_gw,
+        mode=decided_mode,
+        skipped=False,
     )
     if gate_only:
         return
+
+    from analyzer import FPLAnalyzer
+    from optimizer import FPLOptimizer
+    from reporter import FPLReporter
 
     mode = decided_mode
     is_dry_run = (mode == "dry-run")
@@ -282,7 +343,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scheduled",
         action="store_true",
-        help="Cron mode: skip outside T-90/T-60, auto-select dry-run vs execute",
+        help="Cron mode: execute once inside T-75 to T-15, otherwise fast-exit",
     )
     parser.add_argument(
         "--gate-only",

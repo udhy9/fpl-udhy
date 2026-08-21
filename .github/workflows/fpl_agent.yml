@@ -2,8 +2,7 @@ name: FPL Automated Manager
 
 on:
   schedule:
-    # Frequent cheap checks; Playwright + solver only run inside the T-90/T-60 window.
-    # A 6-hour-only cron would miss most 75-minute pre-deadline windows.
+    # Wakes up every 30 mins to monitor T-75 to T-15 execute windows
     - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
@@ -37,8 +36,8 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
+      - name: Install gate dependencies
+        run: pip install requests
 
       - name: Deadline gate
         id: gate
@@ -56,12 +55,14 @@ jobs:
       - name: Scheduled skip notice
         if: steps.gate.outputs.run != 'true'
         run: |
-          echo "Outside the T-90 dry-run / T-60 execute window. Playwright was not installed."
-          echo "Countdown is in data/schedule.json. Manual run: Actions → Run workflow → force if needed."
+          echo "Fast exit: outside T-75 to T-15, deadline passed, or this GW was already submitted."
+          echo "Playwright and the solver were not installed. See data/schedule.json."
 
-      - name: Install Playwright
+      - name: Install full dependencies
         if: steps.gate.outputs.run == 'true'
-        run: playwright install chromium --with-deps
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
 
       - name: Run FPL Agent (${{ steps.gate.outputs.mode }})
         if: steps.gate.outputs.run == 'true'
@@ -91,4 +92,4 @@ jobs:
           git config --global user.name "FPL AI Agent"
           git config --global user.email "bot@fpl-agent.ai"
           git add REPORT.md data/
-          git diff --quiet && git diff --staged --quiet || (git commit -m "update: GW schedule & team state [skip ci]" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "update: GW lineup & schedule state [skip ci]" && git push)

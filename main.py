@@ -9,14 +9,27 @@ from reporter import FPLReporter
 
 def run(mode="dry-run"):
     client = FPLClient()
-    client.login()
-    client.persist_rotated_refresh_token()
+    is_dry_run = (mode == "dry-run")
+
+    logged_in = client.login()
+    if logged_in:
+        client.persist_rotated_refresh_token()
+    elif not is_dry_run:
+        raise RuntimeError(
+            "Authentication failed. Execute mode cannot use the public picks API. "
+            "Set GitHub secret FPL_COOKIE to the pl_profile cookie from "
+            "fantasy.premierleague.com (DevTools → Application → Cookies), "
+            "or set a fresh FPL_REFRESH_TOKEN after closing every FPL tab. "
+            "Email/password login does not work from GitHub Actions."
+        )
+    else:
+        print("Auth unavailable; dry-run will use the public team endpoint if FPL_TEAM_ID is set.")
 
     bootstrap = client.get_bootstrap_data()
     event = client.get_current_event()
     gw = event["id"]
 
-    my_team = client.get_my_team()
+    my_team = client.get_my_team(current_gw=gw)
     prev_snapshot = client.load_previous_snapshot(gw)
     manual_transfers = client.detect_manual_transfers(my_team, prev_snapshot)
 
@@ -29,7 +42,6 @@ def run(mode="dry-run"):
     )
     plan = optimizer.optimize()
 
-    is_dry_run = (mode == "dry-run")
     report_md = FPLReporter.generate_report(
         gw, plan, analyzer.elements, manual_transfers, is_dry_run, teams=analyzer.teams
     )

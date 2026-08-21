@@ -83,6 +83,9 @@ jobs:
         env:
           FPL_TEAM_ID: ${{ secrets.FPL_TEAM_ID }}
           FPL_REFRESH_TOKEN: ${{ secrets.FPL_REFRESH_TOKEN }}
+          FPL_COOKIE: ${{ secrets.FPL_COOKIE }}
+          FPL_EMAIL: ${{ secrets.FPL_EMAIL }}
+          FPL_PASSWORD: ${{ secrets.FPL_PASSWORD }}
         run: |
           python main.py --mode ${{ steps.mode.outputs.mode }}
 

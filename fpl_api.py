@@ -7,6 +7,7 @@ import requests
 
 
 class FPLClient:
+    LOGIN_URL = "https://users.premierleague.com/accounts/login/"
     BASE_URL = "https://fantasy.premierleague.com/api"
     OIDC_CLIENT_ID = os.environ.get(
         "FPL_OIDC_CLIENT_ID", "bfcbaf69-aade-4c1b-8f00-c1cb8a193030"
@@ -15,11 +16,12 @@ class FPLClient:
         "FPL_TOKEN_URL", "https://account.premierleague.com/as/token"
     )
 
-    def __init__(self, email=None, password=None, team_id=None, refresh_token=None):
+    def __init__(self, email=None, password=None, team_id=None, refresh_token=None, cookie=None):
         self.email = email or os.environ.get("FPL_EMAIL")
         self.password = password or os.environ.get("FPL_PASSWORD")
         self.team_id = team_id or os.environ.get("FPL_TEAM_ID")
         self.refresh_token = refresh_token or os.environ.get("FPL_REFRESH_TOKEN")
+        self.cookie = cookie or os.environ.get("FPL_COOKIE") or os.environ.get("pl_profile")
         self.access_token = None
         self.rotated_refresh_token = None
         self.my_team = None
@@ -29,6 +31,8 @@ class FPLClient:
             "Origin": "https://fantasy.premierleague.com",
             "Referer": "https://fantasy.premierleague.com/",
         })
+        if self.cookie:
+            self._apply_cookie(self.cookie)
 
     @staticmethod
     def _parse_oidc_blob(raw):
@@ -58,7 +62,25 @@ class FPLClient:
         self.access_token = access_token
         self.session.headers["X-API-Authorization"] = f"Bearer {access_token}"
 
-    def login(self):
+    def _apply_cookie(self, cookie):
+        cookie = cookie.strip().strip('"').strip("'")
+        if "pl_profile=" in cookie or ";" in cookie:
+            for part in cookie.split(";"):
+                part = part.strip()
+                if not part or "=" not in part:
+                    continue
+                name, value = part.split("=", 1)
+                self.session.cookies.set(name.strip(), value.strip(), domain=".premierleague.com")
+            return
+        self.session.cookies.set("pl_profile", cookie, domain=".premierleague.com")
+
+    def _session_is_authenticated(self):
+        if not self.team_id:
+            return False
+        res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
+        return res.status_code == 200
+
+    def _login_oidc(self):
         blob = self._parse_oidc_blob(self.refresh_token)
         refresh = blob["refresh_token"]
         access = blob["access_token"]
@@ -80,10 +102,7 @@ class FPLClient:
             return True
 
         if not refresh:
-            raise ValueError(
-                "FPL_REFRESH_TOKEN is missing. Copy the oidc.user refresh_token "
-                "(or the whole oidc.user JSON) from fantasy.premierleague.com DevTools."
-            )
+            return False
         print(f"FPL refresh token loaded (length={len(refresh)}, client_id={client_id}).")
 
         res = requests.post(
@@ -110,8 +129,8 @@ class FPLClient:
                 pass
             raise RuntimeError(
                 f"FPL OIDC login failed ({res.status_code}): {detail}. "
-                "Close every FPL tab, copy a fresh token immediately, paste the secret, "
-                "then run the workflow before reopening fantasy.premierleague.com."
+                "Set FPL_COOKIE (pl_profile from DevTools) or copy a fresh refresh token "
+                "after closing every FPL tab."
             )
 
         token_data = res.json()
@@ -126,6 +145,41 @@ class FPLClient:
             self.refresh_token = new_refresh
         return True
 
+    def login(self):
+        if self.cookie:
+            try:
+                if self._session_is_authenticated():
+                    print("Authenticated via FPL_COOKIE / pl_profile.")
+                    return True
+                print("FPL_COOKIE was set but my-team rejected the session.")
+            except Exception as exc:
+                print(f"FPL_COOKIE session check failed: {exc}")
+
+        if self.refresh_token:
+            try:
+                if self._login_oidc():
+                    return True
+            except Exception as exc:
+                print(f"OIDC login failed: {exc}")
+
+        if self.email and self.password:
+            try:
+                payload = {
+                    "login": self.email,
+                    "password": self.password,
+                    "app": "plfpl-web",
+                    "redirect_uri": "https://fantasy.premierleague.com/",
+                }
+                res = self.session.post(self.LOGIN_URL, data=payload, timeout=30)
+                if "pl_profile" in self.session.cookies or res.status_code == 200:
+                    if self._session_is_authenticated():
+                        print("Authenticated via FPL email/password.")
+                        return True
+            except Exception as exc:
+                print(f"Email/password login failed: {exc}")
+
+        return False
+
     def persist_rotated_refresh_token(self, path="rotated_refresh_token.txt"):
         if not self.rotated_refresh_token:
             return False
@@ -138,11 +192,59 @@ class FPLClient:
         res.raise_for_status()
         return res.json()
 
-    def get_my_team(self):
-        res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
-        res.raise_for_status()
-        self.my_team = res.json()
-        return self.my_team
+    def _public_team(self, current_gw):
+        if not self.team_id:
+            return None
+        gameweeks = []
+        if current_gw:
+            gameweeks.append(int(current_gw))
+            if int(current_gw) > 1:
+                gameweeks.append(int(current_gw) - 1)
+        else:
+            gameweeks.append(1)
+
+        bank = 0
+        try:
+            entry_res = self.session.get(f"{self.BASE_URL}/entry/{self.team_id}/", timeout=30)
+            if entry_res.status_code == 200:
+                bank = entry_res.json().get("last_deadline_bank") or 0
+        except Exception:
+            pass
+
+        for gw in gameweeks:
+            res = self.session.get(
+                f"{self.BASE_URL}/entry/{self.team_id}/event/{gw}/picks/",
+                timeout=30,
+            )
+            if res.status_code != 200:
+                continue
+            data = res.json()
+            print(f"Using public squad snapshot from event {gw} (unauthenticated).")
+            return {
+                "picks": data.get("picks", []),
+                "transfers": {"limit": 1, "made": 0, "bank": bank},
+                "chips": [],
+            }
+        return None
+
+    def get_my_team(self, current_gw=None):
+        try:
+            res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
+            if res.status_code == 200:
+                self.my_team = res.json()
+                return self.my_team
+        except Exception as exc:
+            print(f"Authenticated my-team lookup failed: {exc}")
+
+        public_team = self._public_team(current_gw)
+        if public_team and public_team.get("picks"):
+            self.my_team = public_team
+            return self.my_team
+
+        raise RuntimeError(
+            "Could not retrieve team data. For execute, set FPL_COOKIE (pl_profile) "
+            "or a valid FPL_REFRESH_TOKEN. Dry-run can use FPL_TEAM_ID plus the public picks API."
+        )
 
     def save_state_snapshot(self, gameweek, team_data):
         os.makedirs("data", exist_ok=True)

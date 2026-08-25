@@ -2,8 +2,8 @@
   "target_gameweek": 2,
   "target_gw_name": "Gameweek 2",
   "deadline_utc": "2026-08-28T17:30:00Z",
-  "minutes_remaining": 5326.3,
-  "last_checked_utc": "2026-08-25T00:43:41.940538+00:00",
+  "minutes_remaining": 5236.3,
+  "last_checked_utc": "2026-08-25T02:13:44.100674+00:00",
   "execution_completed": false,
   "mode": "execute",
   "skipped": true

@@ -192,29 +192,37 @@ class FPLClient:
         return True
 
     def login(self):
+        """Authenticate for write endpoints.
+
+        Prefer FPL_ACCESS_TOKEN / FPL_COOKIE first — Playwright login is routinely
+        blocked by Cloudflare Turnstile on GitHub Actions IPs.
+        """
+        if not self.team_id:
+            print("Warning: FPL_TEAM_ID is missing.")
+            return False
+
+        if self.access_token or self.cookie:
+            try:
+                res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
+                if res.status_code == 200:
+                    print("Authenticated via FPL_ACCESS_TOKEN / FPL_COOKIE.")
+                    return True
+                print(
+                    f"Stored token/cookie rejected: {res.status_code} {res.text[:200]}. "
+                    "Will try Playwright if FPL_EMAIL/FPL_PASSWORD are set."
+                )
+            except Exception as exc:
+                print(f"Token/cookie auth check failed: {exc}")
+
         if self.email and self.password:
             try:
                 return self.login_with_playwright()
             except Exception as exc:
                 print(f"Playwright login failed: {exc}")
 
-        if not self.access_token and not self.cookie:
-            print("Warning: No Playwright credentials and no FPL_ACCESS_TOKEN / FPL_COOKIE.")
-            return False
-        if not self.team_id:
-            print("Warning: FPL_TEAM_ID is missing.")
-            return False
-
-        try:
-            res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
-            if res.status_code == 200:
-                print("Authenticated via FPL_ACCESS_TOKEN / FPL_COOKIE.")
-                return True
-            print(f"Auth check response: {res.status_code} {res.text[:200]}")
-            return False
-        except Exception as exc:
-            print(f"Auth check failed: {exc}")
-            return False
+        if not self.access_token and not self.cookie and not (self.email and self.password):
+            print("Warning: No FPL_ACCESS_TOKEN / FPL_COOKIE and no FPL_EMAIL / FPL_PASSWORD.")
+        return False
 
     @staticmethod
     def _safe_json(res):

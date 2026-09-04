@@ -77,10 +77,21 @@ Navigate to **Settings** → **Secrets and variables** → **Actions** and add:
 
 | Secret Name | Description | Example |
 | --- | --- | --- |
-| `FPL_EMAIL` | Your Premier League login email | `user@example.com` |
-| `FPL_PASSWORD` | Your Premier League password | `YourPassword123` |
 | `FPL_TEAM_ID` | Your FPL Entry / Team ID | `1234567` |
+| `FPL_ACCESS_TOKEN` | **Required for execute on Actions.** Browser `access_token` cookie from fantasy.premierleague.com (JWT starting with `eyJ...`) | `eyJhbGciOi...` |
+| `FPL_COOKIE` | Optional full Cookie header if token-alone auth fails | `access_token=eyJ...; ...` |
+| `FPL_EMAIL` | Login email (Playwright fallback; often blocked by Cloudflare on Actions) | `user@example.com` |
+| `FPL_PASSWORD` | Login password (same limitation as email) | `YourPassword123` |
 | `GEMINI_API_KEY` | Free API key from Google AI Studio | `AIzaSy...` |
+
+**Refresh `FPL_ACCESS_TOKEN` when execute returns 401:**
+
+1. Open [fantasy.premierleague.com](https://fantasy.premierleague.com/) and sign in on your laptop.
+2. DevTools → **Application** → **Cookies** → `fantasy.premierleague.com`.
+3. Copy the value of `access_token` (or from localStorage key `oidc.user:...` → `access_token`).
+4. Update the GitHub secret `FPL_ACCESS_TOKEN`, then re-run the workflow with **execute** + **force**.
+
+Tokens expire; refresh before each deadline if Actions has not logged in successfully recently.
 
 ### 3. Manager Overrides (Optional)
 

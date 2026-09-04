@@ -221,10 +221,10 @@ def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
         client.persist_rotated_refresh_token()
     elif not is_dry_run:
         raise RuntimeError(
-            "Authentication failed. Cloudflare blocks Playwright on GitHub Actions, so set a fresh "
-            "FPL_ACCESS_TOKEN secret (browser cookie `access_token` from fantasy.premierleague.com). "
-            "Optional: FPL_COOKIE with the full cookie header. FPL_EMAIL/FPL_PASSWORD alone will not "
-            "work on Actions when Turnstile challenges the runner IP. FPL_TEAM_ID is required."
+            "Authentication failed. Set GitHub secret FPL_REFRESH_TOKEN from browser Local Storage "
+            "(oidc.user → refresh_token). Access tokens expire quickly; the refresh token is what "
+            "automation needs. Keep the repo private — the bot saves the rotated token to "
+            "data/fpl_refresh_token. FPL_TEAM_ID is required."
         )
     else:
         print("Auth unavailable; dry-run will use the public team endpoint if FPL_TEAM_ID is set.")

@@ -1,11 +1,20 @@
 import json
 import os
+from pathlib import Path
 
 import requests
 
 
 class FPLClient:
     BASE_URL = "https://fantasy.premierleague.com/api"
+    OIDC_TOKEN_URL = os.environ.get(
+        "FPL_TOKEN_URL", "https://account.premierleague.com/as/token"
+    )
+    # Public FPL web client id (PingOne). Override with FPL_OIDC_CLIENT_ID if FPL rotates it.
+    OIDC_CLIENT_ID = os.environ.get(
+        "FPL_OIDC_CLIENT_ID", "bfcbaf69-aade-4c1b-8f00-c1cb8a193030"
+    )
+    REFRESH_TOKEN_PATH = Path("data/fpl_refresh_token")
 
     def __init__(self, team_id=None, access_token=None, cookie=None, email=None, password=None):
         self.team_id = team_id or os.environ.get("FPL_TEAM_ID")
@@ -15,6 +24,8 @@ class FPLClient:
             access_token or os.environ.get("FPL_ACCESS_TOKEN")
         )
         self.cookie = cookie or os.environ.get("FPL_COOKIE") or os.environ.get("pl_profile")
+        self.refresh_token = self._load_refresh_token()
+        self.refresh_token_rotated = False
         self.my_team = None
         self.session = requests.Session()
         self.session.headers.update({
@@ -37,6 +48,84 @@ class FPLClient:
         if token.lower().startswith("bearer "):
             token = token[7:].strip()
         return token or None
+
+    @classmethod
+    def parse_refresh_token(cls, pasted):
+        """Accept a bare refresh token or the full oidc.user Local Storage JSON."""
+        if not pasted:
+            return None
+        trimmed = pasted.strip()
+        try:
+            parsed = json.loads(trimmed)
+            if isinstance(parsed, dict) and parsed.get("refresh_token"):
+                return cls._clean_token(parsed["refresh_token"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return cls._clean_token(trimmed)
+
+    def _load_refresh_token(self):
+        # Rotated file wins over the GitHub secret (secret goes stale after first rotation).
+        if self.REFRESH_TOKEN_PATH.exists():
+            raw = self.REFRESH_TOKEN_PATH.read_text().strip()
+            token = self.parse_refresh_token(raw)
+            if token:
+                return token
+        return self.parse_refresh_token(os.environ.get("FPL_REFRESH_TOKEN"))
+
+    def persist_rotated_refresh_token(self, path=None):
+        """Write the latest rotated refresh token so the next Actions run can reuse it."""
+        if not self.refresh_token:
+            return False
+        target = Path(path) if path else self.REFRESH_TOKEN_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(self.refresh_token + "\n")
+        print(f"Persisted rotated refresh token to {target}.")
+        self.refresh_token_rotated = True
+        return True
+
+    def exchange_refresh_token(self):
+        """Exchange PingOne refresh token for a short-lived access token (rotates RT)."""
+        if not self.refresh_token:
+            raise RuntimeError("No FPL_REFRESH_TOKEN configured.")
+
+        client_ids = [self.OIDC_CLIENT_ID]
+        # Historical / documented alternate FPL web client id.
+        alt = "1f243d70-a140-4035-8c41-341f5af5aa12"
+        if alt not in client_ids:
+            client_ids.append(alt)
+
+        last_error = None
+        for client_id in client_ids:
+            res = self.session.post(
+                self.OIDC_TOKEN_URL,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token,
+                    "client_id": client_id,
+                },
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
+                timeout=30,
+            )
+            try:
+                payload = res.json()
+            except ValueError:
+                payload = {}
+            if res.status_code == 200 and payload.get("access_token"):
+                self._apply_access_token(payload["access_token"])
+                new_rt = payload.get("refresh_token")
+                if new_rt and new_rt != self.refresh_token:
+                    self.refresh_token = self._clean_token(new_rt)
+                    print("PingOne rotated the refresh token; saved for next run.")
+                self.persist_rotated_refresh_token()
+                return True
+            detail = payload.get("error_description") or payload.get("error") or res.text[:300]
+            last_error = f"{res.status_code} {detail}"
+            print(f"Token refresh with client_id={client_id} failed: {last_error}")
+
+        raise RuntimeError(f"FPL token refresh failed: {last_error}")
 
     def _apply_access_token(self, access_token):
         self.access_token = self._clean_token(access_token)
@@ -165,21 +254,24 @@ class FPLClient:
                     "Turnstile/CAPTCHA likely blocked the headless browser."
                 )
 
-            token = page.evaluate(
+            oidc = page.evaluate(
                 """() => {
                     try {
                         const key = Object.keys(localStorage).find(k => k.startsWith('oidc.user:'));
                         if (!key) return null;
-                        const data = JSON.parse(localStorage.getItem(key) || '{}');
-                        return data.access_token || null;
+                        return JSON.parse(localStorage.getItem(key) || '{}');
                     } catch (e) {
                         return null;
                     }
                 }"""
             )
             self._import_browser_cookies(context.cookies())
-            if token:
-                self._apply_access_token(token)
+            if isinstance(oidc, dict):
+                if oidc.get("access_token"):
+                    self._apply_access_token(oidc["access_token"])
+                if oidc.get("refresh_token"):
+                    self.refresh_token = self._clean_token(oidc["refresh_token"])
+                    self.persist_rotated_refresh_token()
             browser.close()
 
         if self.team_id:
@@ -194,12 +286,23 @@ class FPLClient:
     def login(self):
         """Authenticate for write endpoints.
 
-        Prefer FPL_ACCESS_TOKEN / FPL_COOKIE first — Playwright login is routinely
-        blocked by Cloudflare Turnstile on GitHub Actions IPs.
+        Preferred path: FPL_REFRESH_TOKEN (or data/fpl_refresh_token) → PingOne exchange.
+        Short-lived FPL_ACCESS_TOKEN alone is not enough for recurring automation.
         """
         if not self.team_id:
             print("Warning: FPL_TEAM_ID is missing.")
             return False
+
+        if self.refresh_token:
+            try:
+                self.exchange_refresh_token()
+                res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
+                if res.status_code == 200:
+                    print("Authenticated via FPL_REFRESH_TOKEN (PingOne OIDC).")
+                    return True
+                print(f"Refresh-token access rejected by my-team: {res.status_code} {res.text[:200]}")
+            except Exception as exc:
+                print(f"Refresh-token exchange failed: {exc}")
 
         if self.access_token or self.cookie:
             try:
@@ -208,7 +311,7 @@ class FPLClient:
                     print("Authenticated via FPL_ACCESS_TOKEN / FPL_COOKIE.")
                     return True
                 print(
-                    f"Stored token/cookie rejected: {res.status_code} {res.text[:200]}. "
+                    f"Stored access token/cookie rejected: {res.status_code} {res.text[:200]}. "
                     "Will try Playwright if FPL_EMAIL/FPL_PASSWORD are set."
                 )
             except Exception as exc:
@@ -220,8 +323,13 @@ class FPLClient:
             except Exception as exc:
                 print(f"Playwright login failed: {exc}")
 
-        if not self.access_token and not self.cookie and not (self.email and self.password):
-            print("Warning: No FPL_ACCESS_TOKEN / FPL_COOKIE and no FPL_EMAIL / FPL_PASSWORD.")
+        if not self.refresh_token and not self.access_token and not self.cookie and not (
+            self.email and self.password
+        ):
+            print(
+                "Warning: No FPL_REFRESH_TOKEN / FPL_ACCESS_TOKEN / FPL_COOKIE "
+                "and no FPL_EMAIL / FPL_PASSWORD."
+            )
         return False
 
     @staticmethod
@@ -235,9 +343,6 @@ class FPLClient:
             return res.json()
         except ValueError:
             return {"status": "success", "status_code": res.status_code, "raw": text[:200]}
-
-    def persist_rotated_refresh_token(self, path="rotated_refresh_token.txt"):
-        return False
 
     def get_bootstrap_data(self):
         res = self.session.get(f"{self.BASE_URL}/bootstrap-static/", timeout=30)

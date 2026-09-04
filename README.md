@@ -78,20 +78,26 @@ Navigate to **Settings** → **Secrets and variables** → **Actions** and add:
 | Secret Name | Description | Example |
 | --- | --- | --- |
 | `FPL_TEAM_ID` | Your FPL Entry / Team ID | `1234567` |
-| `FPL_ACCESS_TOKEN` | **Required for execute on Actions.** Browser `access_token` cookie from fantasy.premierleague.com (JWT starting with `eyJ...`) | `eyJhbGciOi...` |
-| `FPL_COOKIE` | Optional full Cookie header if token-alone auth fails | `access_token=eyJ...; ...` |
-| `FPL_EMAIL` | Login email (Playwright fallback; often blocked by Cloudflare on Actions) | `user@example.com` |
-| `FPL_PASSWORD` | Login password (same limitation as email) | `YourPassword123` |
+| `FPL_REFRESH_TOKEN` | **Required for automated execute.** `refresh_token` from Local Storage `oidc.user:...` (not the short-lived `access_token`) | `eyJ...` |
+| `FPL_ACCESS_TOKEN` | Optional one-shot JWT; expires quickly — prefer refresh token | `eyJ...` |
+| `FPL_COOKIE` | Optional full Cookie header | `...` |
+| `FPL_EMAIL` / `FPL_PASSWORD` | Playwright fallback (often blocked by Cloudflare on Actions) | |
 | `GEMINI_API_KEY` | Free API key from Google AI Studio | `AIzaSy...` |
 
-**Refresh `FPL_ACCESS_TOKEN` when execute returns 401:**
+**One-time refresh-token setup (this is what makes automation work):**
 
-1. Open [fantasy.premierleague.com](https://fantasy.premierleague.com/) and sign in on your laptop.
-2. DevTools → **Application** → **Cookies** → `fantasy.premierleague.com`.
-3. Copy the value of `access_token` (or from localStorage key `oidc.user:...` → `access_token`).
-4. Update the GitHub secret `FPL_ACCESS_TOKEN`, then re-run the workflow with **execute** + **force**.
+1. Make the repo **private** (the bot commits the rotated token to `data/fpl_refresh_token`).
+2. Sign in at [fantasy.premierleague.com](https://fantasy.premierleague.com/).
+3. DevTools → **Console**, paste:
 
-Tokens expire; refresh before each deadline if Actions has not logged in successfully recently.
+```js
+copy(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('oidc.user:')))).refresh_token)
+```
+
+4. Create/update GitHub secret `FPL_REFRESH_TOKEN` with the clipboard value.
+5. Run workflow **execute** + **force**. After the first success, the bot keeps renewing tokens itself.
+
+Do **not** keep pasting `access_token` — it refreshes every hour by design. Avoid logging into FPL in the browser right before a deadline if the bot just rotated the same refresh token (PingOne invalidates reused tokens).
 
 ### 3. Manager Overrides (Optional)
 

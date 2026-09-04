@@ -6,3 +6,5 @@ venv/
 .DS_Store
 rotated_refresh_token.txt
 .fpl_token_cache
+# Rotated RT is intentionally committed under data/ for Actions continuity.
+# Keep the repository private.

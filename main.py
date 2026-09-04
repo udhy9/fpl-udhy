@@ -6,8 +6,11 @@ from datetime import datetime, timezone
 from fpl_api import FPLClient
 
 SCHEDULE_FILE = "data/schedule.json"
-EXECUTE_WINDOW_MAX = 75
-EXECUTE_WINDOW_MIN = 15
+# GitHub often delays */30 cron by 2–5+ hours, so a 60-minute T-75→T-15
+# window is routinely missed. Keep a wide execute band and a dry-run preview.
+EXECUTE_WINDOW_MAX = 360  # T-6h
+EXECUTE_WINDOW_MIN = 5    # stop starting full submits inside T-5
+DRY_RUN_WINDOW_MAX = 720  # T-12h preview
 
 
 def _parse_deadline(deadline_str):
@@ -45,12 +48,14 @@ def check_deadline_window(bootstrap_data):
 
 
 def decide_scheduled_mode(minutes_remaining):
-    """Scheduled cron submits once inside T-75 to T-15. None means fast-exit."""
+    """Scheduled cron: dry-run in T-12h→T-6h, execute once in T-6h→T-5m. None = fast-exit."""
     if minutes_remaining < EXECUTE_WINDOW_MIN:
         return None
-    if minutes_remaining > EXECUTE_WINDOW_MAX:
-        return None
-    return "execute"
+    if minutes_remaining <= EXECUTE_WINDOW_MAX:
+        return "execute"
+    if minutes_remaining <= DRY_RUN_WINDOW_MAX:
+        return "dry-run"
+    return None
 
 
 def load_schedule_state():
@@ -93,12 +98,18 @@ def _write_github_output(**kwargs):
             f.write(f"{key}={value}\n")
 
 
-def _fast_exit(next_event, deadline_str, minutes_remaining, executed, mode, reason):
+def _fast_exit(next_event, deadline_str, minutes_remaining, executed, mode, reason, commit_schedule=False):
     print(reason)
     save_schedule_log(
         next_event, deadline_str, minutes_remaining, executed=executed, mode=mode, skipped=True
     )
-    _write_github_output(run="false", mode=mode or "dry-run")
+    # Only commit far-skip noise when we are approaching a deadline (keeps history useful).
+    near = minutes_remaining <= DRY_RUN_WINDOW_MAX
+    _write_github_output(
+        run="false",
+        mode=mode or "dry-run",
+        commit_schedule="true" if (commit_schedule or near) else "false",
+    )
 
 
 def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
@@ -107,7 +118,7 @@ def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
     next_event, minutes_remaining, deadline_str = check_deadline_window(bootstrap)
     if not next_event:
         print("No active Gameweek found. Exiting.")
-        _write_github_output(run="false", mode="dry-run")
+        _write_github_output(run="false", mode="dry-run", commit_schedule="false")
         return
 
     prev_state = load_schedule_state()
@@ -121,19 +132,30 @@ def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
         f"Countdown: {minutes_remaining:.1f}m | already_executed={already_executed_for_gw}"
     )
 
-    decided_mode = "execute" if scheduled and not force else mode
-
-    if not force:
-        if minutes_remaining > EXECUTE_WINDOW_MAX and (scheduled or decided_mode == "execute"):
+    if scheduled and not force:
+        decided_mode = decide_scheduled_mode(minutes_remaining)
+        if decided_mode is None:
+            reason = (
+                "Gameweek deadline has passed. Awaiting next round."
+                if minutes_remaining < 0
+                else "Outside T-12h dry-run / T-6h execute window. Fast exit to conserve runtime."
+            )
+            if minutes_remaining >= 0 and minutes_remaining < EXECUTE_WINDOW_MIN:
+                reason = "Inside T-5m. Too close to deadline to start a full run."
             _fast_exit(
                 next_event,
                 deadline_str,
                 minutes_remaining,
-                already_executed_for_gw,
-                decided_mode,
-                "Outside target window (T-75m to T-15m). Fast exit to conserve runtime.",
+                already_executed_for_gw if minutes_remaining >= 0 else False,
+                "execute",
+                reason,
             )
             return
+        print(f"Scheduled deadline window selected mode={decided_mode}.")
+    else:
+        decided_mode = mode
+
+    if not force:
         if minutes_remaining < 0:
             _fast_exit(
                 next_event,
@@ -144,6 +166,16 @@ def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
                 "Gameweek deadline has passed. Awaiting next round.",
             )
             return
+        if decided_mode == "execute" and minutes_remaining > EXECUTE_WINDOW_MAX:
+            _fast_exit(
+                next_event,
+                deadline_str,
+                minutes_remaining,
+                already_executed_for_gw,
+                decided_mode,
+                "Execute is gated to the T-6h→T-5m window. Pass --force to override.",
+            )
+            return
         if decided_mode == "execute" and minutes_remaining < EXECUTE_WINDOW_MIN:
             _fast_exit(
                 next_event,
@@ -151,7 +183,7 @@ def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
                 minutes_remaining,
                 already_executed_for_gw,
                 decided_mode,
-                "Inside T-15m. Too close to deadline to start a full execute.",
+                "Inside T-5m. Too close to deadline to start a full execute.",
             )
             return
         if already_executed_for_gw and decided_mode == "execute":
@@ -165,7 +197,7 @@ def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
             )
             return
 
-    _write_github_output(run="true", mode=decided_mode)
+    _write_github_output(run="true", mode=decided_mode, commit_schedule="true")
     save_schedule_log(
         next_event,
         deadline_str,
@@ -343,7 +375,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scheduled",
         action="store_true",
-        help="Cron mode: execute once inside T-75 to T-15, otherwise fast-exit",
+        help="Cron mode: dry-run in T-12h→T-6h, execute once in T-6h→T-5m",
     )
     parser.add_argument(
         "--gate-only",

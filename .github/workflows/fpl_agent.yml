@@ -2,7 +2,7 @@ name: FPL Automated Manager
 
 on:
   schedule:
-    # Wakes up every 30 mins to monitor T-75 to T-15 execute windows
+    # Requested every 30m. GitHub often delays this 2–5h, so execute window in main.py is T-6h→T-5m.
     - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
@@ -55,7 +55,7 @@ jobs:
       - name: Scheduled skip notice
         if: steps.gate.outputs.run != 'true'
         run: |
-          echo "Fast exit: outside T-75 to T-15, deadline passed, or this GW was already submitted."
+          echo "Fast exit: outside T-12h/T-6h window, deadline passed, or this GW was already submitted."
           echo "Playwright and the solver were not installed. See data/schedule.json."
 
       - name: Install full dependencies
@@ -88,6 +88,7 @@ jobs:
           fi
 
       - name: Commit report, schedule & snapshots
+        if: steps.gate.outputs.run == 'true' || steps.gate.outputs.commit_schedule == 'true'
         run: |
           git config --global user.name "FPL AI Agent"
           git config --global user.email "bot@fpl-agent.ai"

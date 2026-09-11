@@ -37,7 +37,13 @@ class FPLClient:
 
         if self.cookie:
             self._apply_cookie(self.cookie)
-        if self.access_token:
+        # Do not attach a possibly-expired access token before PingOne refresh.
+        # An Authorization header on the token endpoint causes:
+        # "Request contains invalid 'Authorization' header".
+        if self.refresh_token:
+            self._clear_auth_headers()
+            self.access_token = None
+        elif self.access_token:
             self._apply_access_token(self.access_token)
 
     @staticmethod
@@ -83,20 +89,27 @@ class FPLClient:
         self.refresh_token_rotated = True
         return True
 
+    def _clear_auth_headers(self):
+        self.session.headers.pop("Authorization", None)
+        self.session.headers.pop("X-API-Authorization", None)
+
     def exchange_refresh_token(self):
         """Exchange PingOne refresh token for a short-lived access token (rotates RT)."""
         if not self.refresh_token:
             raise RuntimeError("No FPL_REFRESH_TOKEN configured.")
 
+        # Token endpoint must NOT receive Bearer auth from an old FPL_ACCESS_TOKEN.
+        self._clear_auth_headers()
+
         client_ids = [self.OIDC_CLIENT_ID]
-        # Historical / documented alternate FPL web client id.
         alt = "1f243d70-a140-4035-8c41-341f5af5aa12"
         if alt not in client_ids:
             client_ids.append(alt)
 
         last_error = None
         for client_id in client_ids:
-            res = self.session.post(
+            # Use a fresh request (no session Authorization / cookies pollution).
+            res = requests.post(
                 self.OIDC_TOKEN_URL,
                 data={
                     "grant_type": "refresh_token",
@@ -104,6 +117,7 @@ class FPLClient:
                     "client_id": client_id,
                 },
                 headers={
+                    "User-Agent": self.session.headers.get("User-Agent", "fpl-udhy-agent"),
                     "Content-Type": "application/x-www-form-urlencoded",
                     "Accept": "application/json",
                 },

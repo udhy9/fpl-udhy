@@ -2,13 +2,13 @@
 **Status:** `DRY RUN (Preview for Email Review)`
 
 ### 🎖️ Captaincy
-- **Captain (C):** **B.Fernandes** (xP: 10.26)
+- **Captain (C):** **B.Fernandes** (xP: 10.25)
 - **Vice-Captain (VC):** **Mbeumo** (xP: 7.56)
 
 ### 🏦 Free Transfer Strategy
 - **Available:** 1 / 5
 - **Action:** PLAY qualifying transfer(s)
-- Playing 1 transfer(s) from 1 FT(s); unused FTs roll toward a 5-FT mini-wildcard. F.Kadıoğlu→De Cuyper played (3GW gain +16.8 > 2.0).
+- Playing 1 transfer(s) from 1 FT(s); unused FTs roll toward a 5-FT mini-wildcard. F.Kadıoğlu→De Cuyper played (3GW gain +16.9 > 2.0).
 
 ### 🎰 Automated Chip Strategy
 - **Window:** Set 1 (expires GW19)
@@ -21,7 +21,7 @@
 - **Current 15 sell value (50% profit tax):** £99.2m
 - **Bank:** £0.5m
 - **Spendable budget:** £99.7m
-- **Overall rank:** 5,754,580 — chasing rank (differentials allowed)
+- **Overall rank:** 5,754,569 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
@@ -32,10 +32,10 @@
 | Pos | Player | Team | Projected xP | xP/£ |
 | :--- | :--- | :--- | :--- | :--- |
 | GK | Verbruggen | BHA | 2.89 | 0.64 |
-| DEF | De Cuyper | BHA | 6.89 | 1.44 |
+| DEF | De Cuyper | BHA | 6.9 | 1.44 |
 | DEF | N.Williams | NFO | 2.86 | 0.57 |
 | DEF | O'Reilly | MCI | 1.99 | 0.31 |
-| MID | B.Fernandes **(C)** | MUN | 10.26 | 0.85 |
+| MID | B.Fernandes **(C)** | MUN | 10.25 | 0.85 |
 | MID | Mbeumo **(VC)** | MUN | 7.56 | 0.96 |
 | MID | Cherki | MCI | 6.01 | 0.77 |
 | MID | Szoboszlai | LIV | 5.08 | 0.73 |
@@ -52,7 +52,7 @@
 *Auto-generated at DRY RUN (Preview for Email Review) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-09-12T12:30:00Z (669.7 min remaining)
+- **Target GW Deadline:** 2026-09-12T12:30:00Z (387.4 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
 - **Automated Chip Strategy:** `None (standard gameweek)`
 - **Rationale:** Quantitative xMins optimization applied. Benched Ajayi to avoid CS cannibalization vs our attackers; started O'Reilly.

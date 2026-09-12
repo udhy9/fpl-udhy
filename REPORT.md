@@ -1,5 +1,5 @@
 # ⚽ FPL Gameweek 4 Decision Report
-**Status:** `DRY RUN (Preview for Email Review)`
+**Status:** `EXECUTED (Applied to FPL Server)`
 
 ### 🎖️ Captaincy
 - **Captain (C):** **B.Fernandes** (xP: 10.25)
@@ -15,13 +15,14 @@
 - **Recommendation:** `None (standard gameweek)`
 - **Playing this week:** none (alert only; Wildcard/Free Hit are never auto-played unless `allow_auto_chips` is set)
 - No chip trigger this week.
+- **Available this half:** 3xc, bboost, freehit, wildcard
 - Injured/unavailable: 1; DGW players: 0; BGW players: 0
 
 ### 💷 Squad Liquidation
-- **Current 15 sell value (50% profit tax):** £99.2m
+- **Current 15 sell value (50% profit tax):** £98.9m
 - **Bank:** £0.5m
-- **Spendable budget:** £99.7m
-- **Overall rank:** 5,754,569 — chasing rank (differentials allowed)
+- **Spendable budget:** £99.4m
+- **Overall rank:** 5,754,564 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
@@ -49,10 +50,10 @@
 3. **Semenyo** (MID) - xP: 3.73
 4. **Pedro Porro** (DEF) - xP: 1.73
 
-*Auto-generated at DRY RUN (Preview for Email Review) window.*
+*Auto-generated at EXECUTED (Applied to FPL Server) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-09-12T12:30:00Z (387.4 min remaining)
+- **Target GW Deadline:** 2026-09-12T12:30:00Z (308.2 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
 - **Automated Chip Strategy:** `None (standard gameweek)`
 - **Rationale:** Quantitative xMins optimization applied. Benched Ajayi to avoid CS cannibalization vs our attackers; started O'Reilly.

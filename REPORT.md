@@ -1,14 +1,14 @@
-# ⚽ FPL Gameweek 4 Decision Report
-**Status:** `EXECUTED (Applied to FPL Server)`
+# ⚽ FPL Gameweek 5 Decision Report
+**Status:** `DRY RUN (Preview for Email Review)`
 
 ### 🎖️ Captaincy
-- **Captain (C):** **B.Fernandes** (xP: 10.25)
-- **Vice-Captain (VC):** **Mbeumo** (xP: 7.56)
+- **Captain (C):** **B.Fernandes** (xP: 10.34)
+- **Vice-Captain (VC):** **De Cuyper** (xP: 8.53)
 
 ### 🏦 Free Transfer Strategy
 - **Available:** 1 / 5
 - **Action:** PLAY qualifying transfer(s)
-- Playing 1 transfer(s) from 1 FT(s); unused FTs roll toward a 5-FT mini-wildcard. F.Kadıoğlu→De Cuyper played (3GW gain +16.9 > 2.0).
+- Playing 1 transfer(s) from 1 FT(s); unused FTs roll toward a 5-FT mini-wildcard. Pedro Porro→Bogle forced (injury/0 xMins, 3GW +13.7).
 
 ### 🎰 Automated Chip Strategy
 - **Window:** Set 1 (expires GW19)
@@ -19,41 +19,41 @@
 - Injured/unavailable: 1; DGW players: 0; BGW players: 0
 
 ### 💷 Squad Liquidation
-- **Current 15 sell value (50% profit tax):** £98.9m
-- **Bank:** £0.5m
-- **Spendable budget:** £99.4m
-- **Overall rank:** 5,754,564 — chasing rank (differentials allowed)
+- **Current 15 sell value (50% profit tax):** £99.1m
+- **Bank:** £0.1m
+- **Spendable budget:** £99.2m
+- **Overall rank:** 6,682,802 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
 | :--- | :--- |
-| F.Kadıoğlu | **De Cuyper** |
+| Pedro Porro | **Bogle** |
 
 ### 🟢 Starting XI
 | Pos | Player | Team | Projected xP | xP/£ |
 | :--- | :--- | :--- | :--- | :--- |
-| GK | Verbruggen | BHA | 2.89 | 0.64 |
-| DEF | De Cuyper | BHA | 6.9 | 1.44 |
-| DEF | N.Williams | NFO | 2.86 | 0.57 |
-| DEF | O'Reilly | MCI | 1.99 | 0.31 |
-| MID | B.Fernandes **(C)** | MUN | 10.25 | 0.85 |
-| MID | Mbeumo **(VC)** | MUN | 7.56 | 0.96 |
-| MID | Cherki | MCI | 6.01 | 0.77 |
-| MID | Szoboszlai | LIV | 5.08 | 0.73 |
-| FWD | João Pedro | CHE | 6.32 | 0.82 |
-| FWD | Thiago | BRE | 3.96 | 0.5 |
-| FWD | Calvert-Lewin | LEE | 3.94 | 0.66 |
+| GK | Verbruggen | BHA | 3.51 | 0.78 |
+| DEF | De Cuyper **(VC)** | BHA | 8.53 | 1.74 |
+| DEF | Bogle | LEE | 6.16 | 1.34 |
+| DEF | Ajayi | HUL | 3.89 | 0.93 |
+| MID | B.Fernandes **(C)** | MUN | 10.34 | 0.86 |
+| MID | Mbeumo | MUN | 8.22 | 1.04 |
+| MID | Cherki | MCI | 7.23 | 0.93 |
+| MID | Szoboszlai | LIV | 5.55 | 0.79 |
+| MID | Semenyo | MCI | 3.64 | 0.43 |
+| FWD | Calvert-Lewin | LEE | 7.17 | 1.2 |
+| FWD | Thiago | BRE | 4.12 | 0.53 |
 
 ### 🪑 Bench Order
-1. **Petrović** (GK) - xP: 1.62
-2. **Ajayi** (DEF) - xP: 4.84
-3. **Semenyo** (MID) - xP: 3.73
-4. **Pedro Porro** (DEF) - xP: 1.73
+1. **Petrović** (GK) - xP: 1.53
+2. **N.Williams** (DEF) - xP: 3.21
+3. **O'Reilly** (DEF) - xP: 1.81
+4. **João Pedro** (FWD) - xP: 5.61
 
-*Auto-generated at EXECUTED (Applied to FPL Server) window.*
+*Auto-generated at DRY RUN (Preview for Email Review) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-09-12T12:30:00Z (308.2 min remaining)
+- **Target GW Deadline:** 2026-09-18T17:30:00Z (453.3 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
 - **Automated Chip Strategy:** `None (standard gameweek)`
-- **Rationale:** Quantitative xMins optimization applied. Benched Ajayi to avoid CS cannibalization vs our attackers; started O'Reilly.
+- **Rationale:** Quantitative xMins optimization applied. No clash/injury swaps required; kept solver XI.

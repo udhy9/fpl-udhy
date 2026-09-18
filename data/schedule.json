@@ -1,10 +1,10 @@
 {
-  "target_gameweek": 4,
-  "target_gw_name": "Gameweek 4",
-  "deadline_utc": "2026-09-12T12:30:00Z",
-  "minutes_remaining": 89.2,
-  "last_checked_utc": "2026-09-12T11:00:48.857842+00:00",
-  "execution_completed": true,
-  "mode": "execute",
-  "skipped": true
+  "target_gameweek": 5,
+  "target_gw_name": "Gameweek 5",
+  "deadline_utc": "2026-09-18T17:30:00Z",
+  "minutes_remaining": 453.3,
+  "last_checked_utc": "2026-09-18T09:56:44.277142+00:00",
+  "execution_completed": false,
+  "mode": "dry-run",
+  "skipped": false
 }

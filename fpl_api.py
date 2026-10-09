@@ -27,6 +27,7 @@ class FPLClient:
         self.cookie = cookie or os.environ.get("FPL_COOKIE") or os.environ.get("pl_profile")
         self.refresh_token_source = None  # "file" | "env"
         self.oidc_client_id = None
+        self.oidc_access_from_blob = None  # optional AT from pasted oidc JSON
         self.refresh_token = self._load_refresh_token()
         self.refresh_token_rotated = False
         self.my_team = None
@@ -67,9 +68,15 @@ class FPLClient:
 
     @classmethod
     def parse_oidc_blob(cls, pasted):
-        """Parse bare refresh token or full oidc.user JSON → {refresh_token, client_id}."""
+        """Parse bare refresh token or full oidc.user JSON → tokens + client_id."""
+        empty = {
+            "refresh_token": None,
+            "access_token": None,
+            "client_id": None,
+            "had_access_only": False,
+        }
         if not pasted:
-            return {"refresh_token": None, "client_id": None, "had_access_only": False}
+            return empty
         trimmed = pasted.strip().strip('"').strip("'")
         # GitHub secrets sometimes store literal \\n escapes
         trimmed = trimmed.replace("\\n", "\n").strip()
@@ -87,6 +94,7 @@ class FPLClient:
                     client_id = client_id[0]
                 return {
                     "refresh_token": rt,
+                    "access_token": at,
                     "client_id": cls._clean_token(client_id) if client_id else None,
                     "had_access_only": bool(at and not rt),
                 }
@@ -94,6 +102,7 @@ class FPLClient:
             pass
         return {
             "refresh_token": cls._clean_token(trimmed),
+            "access_token": None,
             "client_id": None,
             "had_access_only": False,
         }
@@ -107,10 +116,12 @@ class FPLClient:
         blob = self.parse_oidc_blob(pasted)
         if blob.get("client_id"):
             self.oidc_client_id = blob["client_id"]
+        if blob.get("access_token"):
+            self.oidc_access_from_blob = blob["access_token"]
         if blob.get("had_access_only"):
             print(
                 f"WARNING ({source}): pasted oidc JSON has access_token but NO refresh_token. "
-                "Copy .refresh_token specifically — access_token cannot be exchanged."
+                "Will try access_token for this run only (~1h). For automation, copy refresh_token."
             )
         return blob.get("refresh_token")
 
@@ -129,12 +140,35 @@ class FPLClient:
             self.refresh_token_source = "env"
             print(f"Loaded refresh token from FPL_REFRESH_TOKEN ({self._token_fingerprint(token)}).")
             return token
-        if raw:
+        if raw and self.oidc_access_from_blob:
+            print(
+                "FPL_REFRESH_TOKEN secret looks like access-token-only oidc JSON; "
+                "no refresh_token field found."
+            )
+        elif raw:
             print(
                 "FPL_REFRESH_TOKEN is set but could not parse a refresh_token from it. "
                 "Paste the bare refresh_token string or the full oidc.user JSON."
             )
         return None
+
+    def _try_access_token_login(self, token, label):
+        token = self._clean_token(token)
+        if not token:
+            return False
+        self._apply_access_token(token)
+        try:
+            res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
+            if res.status_code == 200:
+                print(
+                    f"Authenticated via {label} ({self._token_fingerprint(token)}). "
+                    "This is short-lived (~1h); set a valid refresh_token for recurring runs."
+                )
+                return True
+            print(f"{label} rejected: {res.status_code} {res.text[:200]}")
+        except Exception as exc:
+            print(f"{label} auth check failed: {exc}")
+        return False
 
     def _env_refresh_token(self):
         return self.parse_refresh_token(os.environ.get("FPL_REFRESH_TOKEN"))
@@ -397,8 +431,9 @@ class FPLClient:
     def login(self):
         """Authenticate for write endpoints.
 
-        Preferred path: FPL_REFRESH_TOKEN (or data/fpl_refresh_token) → PingOne exchange.
-        Short-lived FPL_ACCESS_TOKEN alone is not enough for recurring automation.
+        Preferred: FPL_REFRESH_TOKEN → PingOne exchange (recurring automation).
+        Fallback: FPL_ACCESS_TOKEN / oidc access_token (works ~1 hour — close FPL tabs first).
+        Last resort: Playwright (usually blocked by Cloudflare on Actions).
         """
         if not self.team_id:
             print("Warning: FPL_TEAM_ID is missing.")
@@ -414,19 +449,30 @@ class FPLClient:
                 print(f"Refresh-token access rejected by my-team: {res.status_code} {res.text[:200]}")
             except Exception as exc:
                 print(f"Refresh-token exchange failed: {exc}")
+                print(
+                    "Hint: FPL rotates refresh tokens while the website tab is open. "
+                    "Copy refresh_token → CLOSE all FPL tabs → update secret → run Actions immediately."
+                )
 
-        if self.access_token or self.cookie:
+        # Short-lived fallbacks so this week's execute can still succeed.
+        for token, label in (
+            (self.oidc_access_from_blob, "oidc access_token from FPL_REFRESH_TOKEN JSON"),
+            (os.environ.get("FPL_ACCESS_TOKEN"), "FPL_ACCESS_TOKEN"),
+            (self.access_token, "cached access_token"),
+        ):
+            if self._try_access_token_login(token, label):
+                return True
+
+        if self.cookie:
             try:
+                self._apply_cookie(self.cookie)
                 res = self.session.get(f"{self.BASE_URL}/my-team/{self.team_id}/", timeout=30)
                 if res.status_code == 200:
-                    print("Authenticated via FPL_ACCESS_TOKEN / FPL_COOKIE.")
+                    print("Authenticated via FPL_COOKIE.")
                     return True
-                print(
-                    f"Stored access token/cookie rejected: {res.status_code} {res.text[:200]}. "
-                    "Will try Playwright if FPL_EMAIL/FPL_PASSWORD are set."
-                )
+                print(f"FPL_COOKIE rejected: {res.status_code} {res.text[:200]}")
             except Exception as exc:
-                print(f"Token/cookie auth check failed: {exc}")
+                print(f"Cookie auth check failed: {exc}")
 
         if self.email and self.password:
             try:

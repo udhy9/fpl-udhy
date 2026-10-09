@@ -1,59 +1,77 @@
-# ⚽ FPL Gameweek 5 Decision Report
+# ⚽ FPL Gameweek 6 Decision Report
 **Status:** `EXECUTED (Applied to FPL Server)`
 
 ### 🎖️ Captaincy
-- **Captain (C):** **B.Fernandes** (xP: 10.34)
-- **Vice-Captain (VC):** **De Cuyper** (xP: 8.54)
+- **Captain (C):** **Haaland** (xP: 13.22)
+- **Vice-Captain (VC):** **Groß** (xP: 11.41)
 
-### 🏦 Free Transfer Strategy
-- **Available:** 1 / 5
-- **Action:** PLAY qualifying transfer(s)
-- Playing 1 transfer(s) from 1 FT(s); unused FTs roll toward a 5-FT mini-wildcard. Semenyo→Gibbs-White played (3GW gain +13.6 > 2.0).
+### ♻️ Transfer Window
+- GW1/unlimited free transfers. Wildcard chip is **not** played.
 
 ### 🎰 Automated Chip Strategy
 - **Window:** Set 1 (expires GW19)
-- **Recommendation:** `None (standard gameweek)`
-- **Playing this week:** none (alert only; Wildcard/Free Hit are never auto-played unless `allow_auto_chips` is set)
-- No chip trigger this week.
+- **Recommendation:** `wildcard`
+- **Playing this week:** `wildcard`
+- Forced via manager_override.json force_chip=wildcard.
 - **Available this half:** 3xc, bboost, freehit, wildcard
-- Injured/unavailable: 1; DGW players: 0; BGW players: 0
+- Injured/unavailable: 0; DGW players: 0; BGW players: 0
 
 ### 💷 Squad Liquidation
-- **Current 15 sell value (50% profit tax):** £99.1m
-- **Bank:** £0.1m
-- **Spendable budget:** £99.2m
-- **Overall rank:** 6,682,784 — chasing rank (differentials allowed)
+- **Current 15 sell value (50% profit tax):** £98.5m
+- **Bank:** £0.5m
+- **Spendable budget:** £99.0m
+- **Overall rank:** 7,156,429 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
 | :--- | :--- |
-| Semenyo | **Gibbs-White** |
+| Verbruggen | **Raya** |
+| Petrović | **A.Becker** |
+| Ajayi | **Dasilva** |
+| N.Williams | **Davis** |
+| O'Reilly | **Bogle** |
+| Pedro Porro | **Hall** |
+| B.Fernandes | **Saka** |
+| Mbeumo | **Tavernier** |
+| Cherki | **Schade** |
+| Szoboszlai | **Groß** |
+| João Pedro | **Barry** |
+| Thiago | **Haaland** |
+
+### 🗺 4-GW Rolling Horizon Roadmap
+- Discounted fixture EV with temporal decay `0.9` per future GW. Only this week's transfers are submitted; later weeks are projections.
+| GW | Out | In | Note | FT after |
+| :--- | :--- | :--- | :--- | :--- |
+| GW6 | Verbruggen, Petrović, Ajayi, N.Williams, O'Reilly, Pedro Porro, B.Fernandes, Mbeumo, Cherki, Szoboszlai, João Pedro, Thiago | **Raya, A.Becker, Dasilva, Davis, Bogle, Hall, Saka, Tavernier, Schade, Groß, Barry, Haaland** | committed this week | 1 |
+| GW7 | — | **—** | projected bank / hold | 2 |
+| GW8 | — | **—** | projected bank / hold | 3 |
+| GW9 | — | **—** | projected bank / hold | 4 |
 
 ### 🟢 Starting XI
 | Pos | Player | Team | Projected xP | xP/£ |
 | :--- | :--- | :--- | :--- | :--- |
-| GK | Verbruggen | BHA | 3.51 | 0.78 |
-| DEF | De Cuyper **(VC)** | BHA | 8.54 | 1.74 |
-| DEF | Ajayi | HUL | 3.89 | 0.93 |
-| DEF | N.Williams | NFO | 3.21 | 0.64 |
-| MID | B.Fernandes **(C)** | MUN | 10.34 | 0.86 |
-| MID | Mbeumo | MUN | 8.22 | 1.04 |
-| MID | Gibbs-White | NFO | 8.17 | 1.02 |
-| MID | Cherki | MCI | 7.23 | 0.93 |
-| MID | Szoboszlai | LIV | 5.55 | 0.79 |
-| FWD | Calvert-Lewin | LEE | 7.18 | 1.2 |
-| FWD | Thiago | BRE | 4.12 | 0.53 |
+| GK | Raya | ARS | 5.68 | 0.93 |
+| DEF | De Cuyper | BHA | 8.27 | 1.65 |
+| DEF | Davis | IPS | 7.01 | 1.75 |
+| DEF | Hall | NEW | 5.36 | 1.01 |
+| MID | Groß **(VC)** | BHA | 11.41 | 1.93 |
+| MID | Saka | ARS | 9.61 | 1.0 |
+| MID | Gibbs-White | NFO | 8.48 | 1.06 |
+| MID | Schade | BRE | 7.83 | 1.26 |
+| MID | Tavernier | BOU | 7.57 | 1.24 |
+| FWD | Haaland **(C)** | MCI | 13.22 | 0.85 |
+| FWD | Calvert-Lewin | LEE | 8.85 | 1.47 |
 
 ### 🪑 Bench Order
-1. **Petrović** (GK) - xP: 1.53
-2. **Pedro Porro** (DEF) - xP: 2.25
-3. **O'Reilly** (DEF) - xP: 1.8
-4. **João Pedro** (FWD) - xP: 5.61
+1. **A.Becker** (GK) - xP: 5.82
+2. **Bogle** (DEF) - xP: 7.17
+3. **Barry** (FWD) - xP: 6.75
+4. **Dasilva** (DEF) - xP: 4.91
 
 *Auto-generated at EXECUTED (Applied to FPL Server) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-09-18T17:30:00Z (207.6 min remaining)
+- **Target GW Deadline:** 2026-10-10T10:00:00Z (1192.6 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
-- **Automated Chip Strategy:** `None (standard gameweek)`
-- **Rationale:** Quantitative xMins optimization applied. No clash/injury swaps required; kept solver XI.
+- **Automated Chip Strategy:** `wildcard` — playing `wildcard`
+- **Rationale:** Quantitative xMins optimization applied. Benched A.Becker to avoid CS cannibalization vs our attackers; started Raya. Benched Bogle to avoid CS cannibalization vs our attackers; started Hall.

@@ -24,6 +24,7 @@ class FPLClient:
             access_token or os.environ.get("FPL_ACCESS_TOKEN")
         )
         self.cookie = cookie or os.environ.get("FPL_COOKIE") or os.environ.get("pl_profile")
+        self.refresh_token_source = None  # "file" | "env"
         self.refresh_token = self._load_refresh_token()
         self.refresh_token_rotated = False
         self.my_team = None
@@ -75,7 +76,14 @@ class FPLClient:
             raw = self.REFRESH_TOKEN_PATH.read_text().strip()
             token = self.parse_refresh_token(raw)
             if token:
+                self.refresh_token_source = "file"
                 return token
+        token = self.parse_refresh_token(os.environ.get("FPL_REFRESH_TOKEN"))
+        if token:
+            self.refresh_token_source = "env"
+        return token
+
+    def _env_refresh_token(self):
         return self.parse_refresh_token(os.environ.get("FPL_REFRESH_TOKEN"))
 
     def persist_rotated_refresh_token(self, path=None):
@@ -87,20 +95,21 @@ class FPLClient:
         target.write_text(self.refresh_token + "\n")
         print(f"Persisted rotated refresh token to {target}.")
         self.refresh_token_rotated = True
+        self.refresh_token_source = "file"
         return True
+
+    def _clear_stale_refresh_file(self):
+        if self.REFRESH_TOKEN_PATH.exists():
+            self.REFRESH_TOKEN_PATH.unlink()
+            print(f"Removed stale {self.REFRESH_TOKEN_PATH} (PingOne rejected it).")
+            self.refresh_token_rotated = True  # ensure commit picks up deletion
 
     def _clear_auth_headers(self):
         self.session.headers.pop("Authorization", None)
         self.session.headers.pop("X-API-Authorization", None)
 
-    def exchange_refresh_token(self):
-        """Exchange PingOne refresh token for a short-lived access token (rotates RT)."""
-        if not self.refresh_token:
-            raise RuntimeError("No FPL_REFRESH_TOKEN configured.")
-
-        # Token endpoint must NOT receive Bearer auth from an old FPL_ACCESS_TOKEN.
+    def _try_refresh_with_token(self, token):
         self._clear_auth_headers()
-
         client_ids = [self.OIDC_CLIENT_ID]
         alt = "1f243d70-a140-4035-8c41-341f5af5aa12"
         if alt not in client_ids:
@@ -108,12 +117,11 @@ class FPLClient:
 
         last_error = None
         for client_id in client_ids:
-            # Use a fresh request (no session Authorization / cookies pollution).
             res = requests.post(
                 self.OIDC_TOKEN_URL,
                 data={
                     "grant_type": "refresh_token",
-                    "refresh_token": self.refresh_token,
+                    "refresh_token": token,
                     "client_id": client_id,
                 },
                 headers={
@@ -128,16 +136,46 @@ class FPLClient:
             except ValueError:
                 payload = {}
             if res.status_code == 200 and payload.get("access_token"):
+                self.refresh_token = token
                 self._apply_access_token(payload["access_token"])
                 new_rt = payload.get("refresh_token")
-                if new_rt and new_rt != self.refresh_token:
+                if new_rt and new_rt != token:
                     self.refresh_token = self._clean_token(new_rt)
                     print("PingOne rotated the refresh token; saved for next run.")
                 self.persist_rotated_refresh_token()
-                return True
+                return True, None
             detail = payload.get("error_description") or payload.get("error") or res.text[:300]
             last_error = f"{res.status_code} {detail}"
             print(f"Token refresh with client_id={client_id} failed: {last_error}")
+        return False, last_error
+
+    def exchange_refresh_token(self):
+        """Exchange PingOne refresh token for a short-lived access token (rotates RT)."""
+        if not self.refresh_token:
+            raise RuntimeError("No FPL_REFRESH_TOKEN configured.")
+
+        ok, last_error = self._try_refresh_with_token(self.refresh_token)
+        if ok:
+            return True
+
+        dead = last_error and (
+            "does not exist" in last_error.lower()
+            or "invalid_grant" in last_error.lower()
+            or "expired" in last_error.lower()
+            or "revoked" in last_error.lower()
+        )
+        env_token = self._env_refresh_token()
+        if (
+            dead
+            and self.refresh_token_source == "file"
+            and env_token
+            and env_token != self.refresh_token
+        ):
+            print("Committed refresh token is dead; retrying with FPL_REFRESH_TOKEN secret.")
+            self._clear_stale_refresh_file()
+            ok, last_error = self._try_refresh_with_token(env_token)
+            if ok:
+                return True
 
         raise RuntimeError(f"FPL token refresh failed: {last_error}")
 

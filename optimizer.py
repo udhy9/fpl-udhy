@@ -5,9 +5,12 @@ import pulp
 
 class FPLOptimizer:
     FT_BANK_CAP = 5
-    HORIZON_WEEKS = 3
+    HORIZON_WEEKS = 4
+    HORIZON_DECAY = 0.90
     GAIN_THRESHOLD = 2.0
-    def __init__(self, analyzer, my_team_data, bootstrap_data, overrides, manual_locks=None, gameweek=1, current_gw=None, overall_rank=None):
+    HIT_COST = 4.0
+
+    def __init__(self, analyzer, my_team_data, bootstrap_data, overrides, manual_locks=None, gameweek=1, current_gw=None, overall_rank=None, horizon=None):
         self.analyzer = analyzer
         self.my_team_data = my_team_data
         self.elements = analyzer.elements
@@ -15,6 +18,8 @@ class FPLOptimizer:
         self.manual_locks = manual_locks or []
         self.gameweek = int(current_gw or gameweek or 1)
         self.current_gw = self.gameweek
+        self.horizon = int(horizon or self.HORIZON_WEEKS)
+        self.horizon_gws = list(range(self.current_gw, min(39, self.current_gw + self.horizon)))
         self.overall_rank = overall_rank if overall_rank is not None else analyzer.overall_rank
         if self.overall_rank is not None:
             self.analyzer.overall_rank = self.overall_rank
@@ -25,6 +30,7 @@ class FPLOptimizer:
         }
         self.bank = my_team_data.get("transfers", {}).get("bank", 0)
         self.free_transfers = my_team_data.get("transfers", {}).get("limit", 1)
+        self._horizon_xp_cache = {}
 
     def calculate_selling_price(self, pick_item):
         """True FPL sell value: 50% profit tax (rounded down in tenths of a million)."""
@@ -109,12 +115,25 @@ class FPLOptimizer:
             return False
         return True
 
+    def _horizon_total(self, player_id, from_gw=None, weeks=None):
+        """Cached discounted horizon EV from from_gw over weeks."""
+        from_gw = int(from_gw or self.current_gw)
+        weeks = int(weeks or self.horizon)
+        key = (player_id, from_gw, weeks)
+        if key not in self._horizon_xp_cache:
+            self._horizon_xp_cache[key] = self.analyzer.horizon_xp(
+                player_id, weeks=weeks, decay=self.HORIZON_DECAY
+            )
+        return self._horizon_xp_cache[key]
+
     def _optimize_squad(self, max_transfers):
         current = set(self.current_picks)
         candidates = [
             pid for pid, player in self.elements.items()
             if pid in current or self._can_transfer_in(player)
         ]
+        # Multi-period objective: discounted GW→GW+3 EV (avoids one-week punts).
+        horizon_xp = {pid: self._horizon_total(pid) for pid in candidates}
         xp = {pid: self.analyzer.calculate_xp(pid) for pid in candidates}
         budget = self.bank + sum(self.selling_price.get(pid, 0) for pid in current)
         cost = {
@@ -123,15 +142,15 @@ class FPLOptimizer:
         }
         value_bonus = {}
         for pid in candidates:
-            if pid not in current and cost[pid] <= 55 and xp[pid] > 0:
-                vpm = xp[pid] / max(cost[pid] / 10.0, 0.1)
-                value_bonus[pid] = min(0.8, vpm * 0.08)
+            if pid not in current and cost[pid] <= 55 and horizon_xp[pid] > 0:
+                vpm = horizon_xp[pid] / max(cost[pid] / 10.0, 0.1)
+                value_bonus[pid] = min(0.8, vpm * 0.04)
             else:
                 value_bonus[pid] = 0.0
 
-        prob = pulp.LpProblem("FPL_Squad", pulp.LpMaximize)
+        prob = pulp.LpProblem("FPL_Squad_Horizon", pulp.LpMaximize)
         take = {pid: pulp.LpVariable(f"squad_{pid}", cat=pulp.LpBinary) for pid in candidates}
-        prob += pulp.lpSum([take[pid] * (xp[pid] + value_bonus[pid]) for pid in candidates])
+        prob += pulp.lpSum([take[pid] * (horizon_xp[pid] + value_bonus[pid]) for pid in candidates])
         prob += pulp.lpSum([take[pid] for pid in candidates]) == 15
         prob += pulp.lpSum([take[pid] * cost[pid] for pid in candidates]) <= budget
 
@@ -194,10 +213,110 @@ class FPLOptimizer:
             or self.analyzer.calculate_xmins(player) == 0.0
         )
 
-    def _horizon_gain(self, out_id, in_id):
-        return self.analyzer.horizon_xp(in_id, self.HORIZON_WEEKS) - self.analyzer.horizon_xp(
-            out_id, self.HORIZON_WEEKS
+    def _horizon_gain(self, out_id, in_id, from_gw=None, weeks=None):
+        return self._horizon_total(in_id, from_gw=from_gw, weeks=weeks) - self._horizon_total(
+            out_id, from_gw=from_gw, weeks=weeks
         )
+
+    def _remaining_weeks(self, from_gw):
+        return max(1, min(38, from_gw + self.horizon - 1) - from_gw + 1)
+
+    def _best_future_transfer(self, squad, from_gw, ft_available):
+        """Greedy 0/1 transfer for a future GW using remaining discounted horizon EV."""
+        weeks = self._remaining_weeks(from_gw)
+        current = set(squad)
+        best = None
+        for out_id in list(current):
+            out_pos = self.elements[out_id]["element_type"]
+            out_team = self.elements[out_id]["team"]
+            sell = self.selling_price.get(out_id, self.elements[out_id]["now_cost"])
+            for in_id, player in self.elements.items():
+                if in_id in current or not self._can_transfer_in(player):
+                    continue
+                if player["element_type"] != out_pos:
+                    continue
+                if player["now_cost"] > sell + self.bank:
+                    continue
+                team_count = sum(1 for pid in current if self.elements[pid]["team"] == player["team"])
+                if player["team"] != out_team and team_count >= 3:
+                    continue
+                if player["element_type"] == 1:
+                    if any(
+                        self.elements[pid]["element_type"] == 1
+                        and self.elements[pid]["team"] == player["team"]
+                        and pid != out_id
+                        for pid in current
+                    ):
+                        continue
+                gain = self._horizon_gain(out_id, in_id, from_gw=from_gw, weeks=weeks)
+                hit = 0.0 if ft_available >= 1 else self.HIT_COST
+                net = gain - hit
+                if best is None or net > best["net"]:
+                    best = {
+                        "out": out_id,
+                        "in": in_id,
+                        "gain": round(gain, 2),
+                        "hit": hit,
+                        "net": round(net, 2),
+                    }
+        if best is None or best["net"] <= self.GAIN_THRESHOLD:
+            return None
+        return best
+
+    def _build_multi_period_roadmap(self, final_squad, transfers_in, transfers_out, bank_transfer):
+        """Project GW→GW+3 transfer path. Only current-GW moves are submitted live."""
+        roadmap = {}
+        gw0 = self.current_gw
+        ft = max(0, int(self.free_transfers or 0))
+        made = 0 if bank_transfer else len(transfers_in)
+        if self._forced_chip() in ("wildcard", "freehit") or self.gameweek == 1:
+            made = 0
+            ft_after = min(self.FT_BANK_CAP, max(ft, 1))
+        else:
+            ft_after = min(self.FT_BANK_CAP, max(0, ft - made) + 1)
+
+        roadmap[f"GW{gw0}"] = {
+            "in": [self.elements[pid]["web_name"] for pid in transfers_in],
+            "out": [self.elements[pid]["web_name"] for pid in transfers_out],
+            "note": (
+                "committed this week"
+                if transfers_in
+                else ("bank FT" if bank_transfer else "hold")
+            ),
+            "projected_ft_after": ft_after,
+            "horizon_xi_xp": round(
+                sum(self.analyzer.xp_for_event(pid, gw0) for pid in final_squad[:11]), 2
+            ),
+        }
+
+        squad = list(final_squad)
+        ft_next = ft_after
+        for t in self.horizon_gws[1:]:
+            move = self._best_future_transfer(squad, from_gw=t, ft_available=ft_next)
+            if move:
+                out_id, in_id = move["out"], move["in"]
+                squad = [in_id if pid == out_id else pid for pid in squad]
+                if ft_next >= 1:
+                    ft_next = min(self.FT_BANK_CAP, ft_next - 1 + 1)
+                else:
+                    ft_next = min(self.FT_BANK_CAP, 0 + 1)
+                roadmap[f"GW{t}"] = {
+                    "in": [self.elements[in_id]["web_name"]],
+                    "out": [self.elements[out_id]["web_name"]],
+                    "note": f"projected (net {move['net']:+.1f} over remaining horizon)",
+                    "projected_ft_after": ft_next,
+                    "horizon_gain": move["gain"],
+                    "hit": move["hit"],
+                }
+            else:
+                ft_next = min(self.FT_BANK_CAP, ft_next + 1)
+                roadmap[f"GW{t}"] = {
+                    "in": [],
+                    "out": [],
+                    "note": "projected bank / hold",
+                    "projected_ft_after": ft_next,
+                }
+        return roadmap
 
     def _apply_ft_strategy(self, transfers_in, transfers_out):
         ft = max(0, int(self.free_transfers or 0))
@@ -231,15 +350,19 @@ class FPLOptimizer:
             if forced:
                 kept_in.append(in_id)
                 kept_out.append(out_id)
-                notes.append(f"{out_name}→{in_name} forced (injury/0 xMins, 3GW {gain:+.1f}).")
+                notes.append(
+                    f"{out_name}→{in_name} forced (injury/0 xMins, {self.horizon}GW {gain:+.1f})."
+                )
                 continue
             if gain > self.GAIN_THRESHOLD:
                 kept_in.append(in_id)
                 kept_out.append(out_id)
-                notes.append(f"{out_name}→{in_name} played (3GW gain {gain:+.1f} > {self.GAIN_THRESHOLD}).")
+                notes.append(
+                    f"{out_name}→{in_name} played ({self.horizon}GW gain {gain:+.1f} > {self.GAIN_THRESHOLD})."
+                )
                 continue
             notes.append(
-                f"{out_name}→{in_name} banked (3GW gain {gain:+.1f} ≤ {self.GAIN_THRESHOLD})."
+                f"{out_name}→{in_name} banked ({self.horizon}GW gain {gain:+.1f} ≤ {self.GAIN_THRESHOLD})."
             )
 
         bank = len(kept_in) == 0
@@ -248,7 +371,7 @@ class FPLOptimizer:
             strategy = (
                 f"Banking FT ({ft}/{self.FT_BANK_CAP} now"
                 f"{'' if ft >= self.FT_BANK_CAP else f', rolling toward {next_ft}'}"
-                "). No injury-forced move and no 3-GW gain above "
+                f"). No injury-forced move and no {self.horizon}-GW discounted gain above "
                 f"{self.GAIN_THRESHOLD} pts. " + " ".join(notes)
             ).strip()
         else:
@@ -424,12 +547,26 @@ class FPLOptimizer:
                             vc_id = pid
                             break
 
+        horizon_xp_now = {
+            pid: self._horizon_total(pid) for pid in (list(starting_xi) + list(ordered_bench))
+        }
+        multi_period_roadmap = self._build_multi_period_roadmap(
+            list(starting_xi) + list(ordered_bench),
+            transfers_in,
+            transfers_out,
+            bank_transfer,
+        )
+
         return {
             "starting_xi": starting_xi,
             "bench": ordered_bench,
             "captain": cap_id,
             "vice_captain": vc_id,
             "squad_xp": squad_xp,
+            "horizon_xp": horizon_xp_now,
+            "multi_period_roadmap": multi_period_roadmap,
+            "horizon_weeks": self.horizon,
+            "horizon_decay": self.HORIZON_DECAY,
             "transfers_in": transfers_in,
             "transfers_out": transfers_out,
             "chip": chip_to_play,

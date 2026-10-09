@@ -91,7 +91,29 @@ class FPLReporter:
             lines.append("")
         else:
             lines.append("### 🔄 Planned Transfers")
-            lines.append("- None — banking the FT / current 15 already satisfies the 3-GW EV rule.\n")
+            lines.append(
+                f"- None — banking the FT / current 15 already satisfies the "
+                f"{plan.get('horizon_weeks', 4)}-GW discounted EV rule.\n"
+            )
+
+        roadmap = plan.get("multi_period_roadmap") or {}
+        if roadmap:
+            decay = plan.get("horizon_decay", 0.90)
+            weeks = plan.get("horizon_weeks", 4)
+            lines.append(f"### 🗺 {weeks}-GW Rolling Horizon Roadmap")
+            lines.append(
+                f"- Discounted fixture EV with temporal decay `{decay}` per future GW. "
+                "Only this week's transfers are submitted; later weeks are projections."
+            )
+            lines.append("| GW | Out | In | Note | FT after |")
+            lines.append("| :--- | :--- | :--- | :--- | :--- |")
+            for label, row in roadmap.items():
+                outs = ", ".join(row.get("out") or []) or "—"
+                inns = ", ".join(row.get("in") or []) or "—"
+                note = row.get("note") or ""
+                ft_after = row.get("projected_ft_after", "—")
+                lines.append(f"| {label} | {outs} | **{inns}** | {note} | {ft_after} |")
+            lines.append("")
 
         if manual_transfers:
             lines.append("### 👤 Manual Moves Detected & Preserved")

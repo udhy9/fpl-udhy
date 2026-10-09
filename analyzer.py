@@ -566,19 +566,41 @@ class FPLAnalyzer:
         momentum_mult = self._momentum_multiplier(player, form, np_xgi)
         return max(0.0, blended_base * xmins_factor * ownership_weight * momentum_mult)
 
-    def horizon_xp(self, player_id, weeks=3):
-        """Sum of next N single-GW xP estimates using that week's FDR."""
+    def xp_for_event(self, player_id, event_id):
+        """Single-GW xP for a specific event using that week's FDR / DGW multiplier."""
+        player = self.elements.get(player_id)
         base = self._unfdr_xp(player_id)
-        if base == 0.0:
+        if base == 0.0 or not player:
             return 0.0
-        gw = self.current_gw or 1
-        total = 0.0
-        for event_id in range(gw, gw + weeks):
-            player = self.elements.get(player_id) or {}
-            total += base * self.fixture_factor_for_event(player_id, event_id) * max(
-                self.team_gw_multiplier(player.get("team"), event_id), 0
-            )
-        return round(total, 2)
+        mult = max(self.team_gw_multiplier(player["team"], event_id), 0)
+        return round(base * self.fixture_factor_for_event(player_id, event_id) * mult, 2)
+
+    def calculate_horizon_xp(
+        self, player_id, current_gw=None, horizon_length=4, overall_rank=None, decay=0.90
+    ):
+        """Per-GW discounted projections for gw..gw+(horizon-1). Later GWs use 0.90^offset."""
+        if overall_rank is not None:
+            self.overall_rank = overall_rank
+        gw = int(current_gw or self.current_gw or 1)
+        projections = {}
+        for offset in range(horizon_length):
+            target_gw = gw + offset
+            if target_gw > 38:
+                break
+            raw = self.xp_for_event(player_id, target_gw)
+            projections[target_gw] = round(raw * (decay ** offset), 2)
+        return projections
+
+    def horizon_xp(self, player_id, weeks=4, decay=0.90):
+        """Discounted sum of next N single-GW xP estimates (rolling horizon EV)."""
+        return round(
+            sum(
+                self.calculate_horizon_xp(
+                    player_id, horizon_length=weeks, decay=decay
+                ).values()
+            ),
+            2,
+        )
 
     def calculate_xp(self, player_id, current_gw=None, fixture_multipliers=None, overall_rank=None):
         if current_gw is not None:

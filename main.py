@@ -221,10 +221,15 @@ def run(mode="dry-run", force=False, scheduled=False, gate_only=False):
         client.persist_rotated_refresh_token()
     elif not is_dry_run:
         raise RuntimeError(
-            "Authentication failed. Set GitHub secret FPL_REFRESH_TOKEN from browser Local Storage "
-            "(oidc.user → refresh_token). Access tokens expire quickly; the refresh token is what "
-            "automation needs. Keep the repo private — the bot saves the rotated token to "
-            "data/fpl_refresh_token. FPL_TEAM_ID is required."
+            "Authentication failed: PingOne rejected FPL_REFRESH_TOKEN "
+            "('Refresh token does not exist' = wrong/expired/revoked value). "
+            "1) Sign in at fantasy.premierleague.com/my-team. "
+            "2) Console: allow pasting, then "
+            "copy(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('oidc.user:')))).refresh_token) "
+            "— must print a long eyJ… string, NOT undefined. "
+            "3) Update secret FPL_REFRESH_TOKEN immediately, then Run workflow execute+force "
+            "BEFORE logging into FPL again in the browser (login rotates/revokes the token). "
+            "Do NOT paste access_token. FPL_TEAM_ID required; keep repo private."
         )
     else:
         print("Auth unavailable; dry-run will use the public team endpoint if FPL_TEAM_ID is set.")

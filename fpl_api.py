@@ -10,10 +10,11 @@ class FPLClient:
     OIDC_TOKEN_URL = os.environ.get(
         "FPL_TOKEN_URL", "https://account.premierleague.com/as/token"
     )
-    # Public FPL web client id (PingOne). Override with FPL_OIDC_CLIENT_ID if FPL rotates it.
+    # Public FPL web client ids (PingOne). Override with FPL_OIDC_CLIENT_ID if needed.
     OIDC_CLIENT_ID = os.environ.get(
-        "FPL_OIDC_CLIENT_ID", "bfcbaf69-aade-4c1b-8f00-c1cb8a193030"
+        "FPL_OIDC_CLIENT_ID", "1f243d70-a140-4035-8c41-341f5af5aa12"
     )
+    OIDC_CLIENT_ID_ALT = "bfcbaf69-aade-4c1b-8f00-c1cb8a193030"
     REFRESH_TOKEN_PATH = Path("data/fpl_refresh_token")
 
     def __init__(self, team_id=None, access_token=None, cookie=None, email=None, password=None):
@@ -25,6 +26,7 @@ class FPLClient:
         )
         self.cookie = cookie or os.environ.get("FPL_COOKIE") or os.environ.get("pl_profile")
         self.refresh_token_source = None  # "file" | "env"
+        self.oidc_client_id = None
         self.refresh_token = self._load_refresh_token()
         self.refresh_token_rotated = False
         self.my_team = None
@@ -56,32 +58,83 @@ class FPLClient:
             token = token[7:].strip()
         return token or None
 
+    @staticmethod
+    def _token_fingerprint(token):
+        token = token or ""
+        if len(token) < 24:
+            return f"len={len(token)} (too short — likely not a refresh token)"
+        return f"len={len(token)} prefix={token[:12]}… suffix=…{token[-6:]}"
+
+    @classmethod
+    def parse_oidc_blob(cls, pasted):
+        """Parse bare refresh token or full oidc.user JSON → {refresh_token, client_id}."""
+        if not pasted:
+            return {"refresh_token": None, "client_id": None, "had_access_only": False}
+        trimmed = pasted.strip().strip('"').strip("'")
+        # GitHub secrets sometimes store literal \\n escapes
+        trimmed = trimmed.replace("\\n", "\n").strip()
+        try:
+            parsed = json.loads(trimmed)
+            if isinstance(parsed, dict):
+                rt = cls._clean_token(parsed.get("refresh_token"))
+                at = cls._clean_token(parsed.get("access_token"))
+                client_id = (
+                    parsed.get("client_id")
+                    or (parsed.get("profile") or {}).get("aud")
+                    or (parsed.get("profile") or {}).get("azp")
+                )
+                if isinstance(client_id, list) and client_id:
+                    client_id = client_id[0]
+                return {
+                    "refresh_token": rt,
+                    "client_id": cls._clean_token(client_id) if client_id else None,
+                    "had_access_only": bool(at and not rt),
+                }
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return {
+            "refresh_token": cls._clean_token(trimmed),
+            "client_id": None,
+            "had_access_only": False,
+        }
+
     @classmethod
     def parse_refresh_token(cls, pasted):
         """Accept a bare refresh token or the full oidc.user Local Storage JSON."""
-        if not pasted:
-            return None
-        trimmed = pasted.strip()
-        try:
-            parsed = json.loads(trimmed)
-            if isinstance(parsed, dict) and parsed.get("refresh_token"):
-                return cls._clean_token(parsed["refresh_token"])
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-        return cls._clean_token(trimmed)
+        return cls.parse_oidc_blob(pasted).get("refresh_token")
+
+    def _apply_oidc_blob(self, pasted, source):
+        blob = self.parse_oidc_blob(pasted)
+        if blob.get("client_id"):
+            self.oidc_client_id = blob["client_id"]
+        if blob.get("had_access_only"):
+            print(
+                f"WARNING ({source}): pasted oidc JSON has access_token but NO refresh_token. "
+                "Copy .refresh_token specifically — access_token cannot be exchanged."
+            )
+        return blob.get("refresh_token")
 
     def _load_refresh_token(self):
         # Rotated file wins over the GitHub secret (secret goes stale after first rotation).
         if self.REFRESH_TOKEN_PATH.exists():
             raw = self.REFRESH_TOKEN_PATH.read_text().strip()
-            token = self.parse_refresh_token(raw)
+            token = self._apply_oidc_blob(raw, "file")
             if token:
                 self.refresh_token_source = "file"
+                print(f"Loaded refresh token from file ({self._token_fingerprint(token)}).")
                 return token
-        token = self.parse_refresh_token(os.environ.get("FPL_REFRESH_TOKEN"))
+        raw = os.environ.get("FPL_REFRESH_TOKEN")
+        token = self._apply_oidc_blob(raw, "env") if raw else None
         if token:
             self.refresh_token_source = "env"
-        return token
+            print(f"Loaded refresh token from FPL_REFRESH_TOKEN ({self._token_fingerprint(token)}).")
+            return token
+        if raw:
+            print(
+                "FPL_REFRESH_TOKEN is set but could not parse a refresh_token from it. "
+                "Paste the bare refresh_token string or the full oidc.user JSON."
+            )
+        return None
 
     def _env_refresh_token(self):
         return self.parse_refresh_token(os.environ.get("FPL_REFRESH_TOKEN"))
@@ -110,10 +163,16 @@ class FPLClient:
 
     def _try_refresh_with_token(self, token):
         self._clear_auth_headers()
-        client_ids = [self.OIDC_CLIENT_ID]
-        alt = "1f243d70-a140-4035-8c41-341f5af5aa12"
-        if alt not in client_ids:
-            client_ids.append(alt)
+        client_ids = []
+        for cid in (
+            self.oidc_client_id,
+            os.environ.get("FPL_OIDC_CLIENT_ID"),
+            self.OIDC_CLIENT_ID,
+            self.OIDC_CLIENT_ID_ALT,
+        ):
+            if cid and cid not in client_ids:
+                client_ids.append(cid)
+        print(f"Exchanging refresh token ({self._token_fingerprint(token)}) via PingOne…")
 
         last_error = None
         for client_id in client_ids:

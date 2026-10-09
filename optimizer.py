@@ -39,6 +39,23 @@ class FPLOptimizer:
             return now
         return purchase + (now - purchase) // 2
 
+    def _forced_chip(self):
+        raw = (self.overrides.get("force_chip") or "").strip().lower()
+        aliases = {
+            "wc": "wildcard",
+            "wildcard": "wildcard",
+            "fh": "freehit",
+            "freehit": "freehit",
+            "free_hit": "freehit",
+            "bb": "bboost",
+            "bboost": "bboost",
+            "benchboost": "bboost",
+            "tc": "3xc",
+            "3xc": "3xc",
+            "triplecaptain": "3xc",
+        }
+        return aliases.get(raw.replace(" ", "").replace("_", ""))
+
     def _max_transfers(self):
         if not self.overrides.get("allow_transfers", True):
             return 0
@@ -47,8 +64,11 @@ class FPLOptimizer:
             c.get("name") == "wildcard" and c.get("status_for_entry") == "active"
             for c in chips
         )
-        # GW1 is unlimited free transfers. Do not play the Wildcard chip.
-        if self.gameweek == 1 or wildcard_active:
+        forced = self._forced_chip()
+        # GW1 is unlimited free transfers. Do not play the Wildcard chip unless forced.
+        if self.gameweek == 1 and forced != "wildcard":
+            return 15
+        if wildcard_active or forced in ("wildcard", "freehit"):
             return 15
         return max(0, int(self.free_transfers or 0))
 
@@ -60,6 +80,13 @@ class FPLOptimizer:
         return self.analyzer.available_chip_names(self.my_team_data.get("chips") or [], self.gameweek)
 
     def _chip_to_play(self, recommendation):
+        forced = self._forced_chip()
+        if forced:
+            if forced not in self._available_chips():
+                print(f"force_chip={forced} requested but that chip is not available this half.")
+                return None
+            print(f"Playing forced chip: {forced}")
+            return forced
         if self.gameweek == 1 or not recommendation:
             return None
         if recommendation not in self._available_chips():
@@ -174,6 +201,14 @@ class FPLOptimizer:
 
     def _apply_ft_strategy(self, transfers_in, transfers_out):
         ft = max(0, int(self.free_transfers or 0))
+        forced_chip = self._forced_chip()
+        if forced_chip in ("wildcard", "freehit"):
+            return (
+                transfers_in,
+                transfers_out,
+                False,
+                f"{forced_chip} forced via manager_override — FT banking skipped; full rebuild allowed.",
+            )
         if self.gameweek == 1:
             return (
                 transfers_in,
@@ -369,6 +404,12 @@ class FPLOptimizer:
         chip_rec, chip_meta = self.analyzer.evaluate_chip_strategy(
             self.current_gw, squad_ids, fixture_mults, chips=self.my_team_data.get("chips")
         )
+        forced = self._forced_chip()
+        if forced:
+            chip_rec = forced
+            chip_meta = dict(chip_meta or {})
+            chip_meta["reason"] = f"Forced via manager_override.json force_chip={forced}."
+            chip_meta["urgency_note"] = chip_meta.get("urgency_note") or ""
         chip_to_play = self._chip_to_play(chip_rec)
         if chip_to_play == "3xc":
             dgw_starters = [

@@ -44,7 +44,10 @@ class FPLReporter:
         if chip_play:
             lines.append(f"- **Playing this week:** `{chip_play}`")
         else:
-            lines.append("- **Playing this week:** none (alert only; Wildcard/Free Hit are never auto-played unless `allow_auto_chips` is set)")
+            lines.append(
+                "- **Playing this week:** none (set `force_chip` to `wildcard`/`freehit`/`bboost`/`3xc` "
+                "in `manager_override.json`, or `allow_auto_chips` for auto WC/FH when recommended)"
+            )
         if chip_meta.get("reason"):
             lines.append(f"- {chip_meta['reason']}")
         if chip_meta.get("urgency_note"):

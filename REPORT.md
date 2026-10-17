@@ -3,7 +3,7 @@
 
 ### 🎖️ Captaincy
 - **Captain (C):** **Haaland** (xP: 13.06)
-- **Vice-Captain (VC):** **Cherki** (xP: 11.06)
+- **Vice-Captain (VC):** **Cherki** (xP: 11.07)
 
 ### ♻️ Transfer Window
 - GW1/unlimited free transfers. Wildcard chip is **not** played.
@@ -16,10 +16,10 @@
 - Injured/unavailable: 0; DGW players: 0; BGW players: 0
 
 ### 💷 Squad Liquidation
-- **Current 15 sell value (50% profit tax):** £99.5m
+- **Current 15 sell value (50% profit tax):** £99.8m
 - **Bank:** £0.0m
-- **Spendable budget:** £99.5m
-- **Overall rank:** 7,365,724 — chasing rank (differentials allowed)
+- **Spendable budget:** £99.8m
+- **Overall rank:** 7,365,721 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
@@ -37,9 +37,9 @@
 | GW | Out | In | Note | FT after |
 | :--- | :--- | :--- | :--- | :--- |
 | GW7 | Raya, A.Becker, Davis, Saka, Gibbs-White, Schade, Calvert-Lewin | **Verbruggen, Rushworth, Calafiori, Rudoni, Cherki, Mbeumo, Barry** | committed this week | 1 |
-| GW8 | — | **—** | projected bank / hold | 2 |
-| GW9 | — | **—** | projected bank / hold | 3 |
-| GW10 | — | **—** | projected bank / hold | 4 |
+| GW8 | McBurnie | **Delap** | projected (net +2.7 over remaining horizon) | 1 |
+| GW9 | — | **—** | projected bank / hold | 2 |
+| GW10 | — | **—** | projected bank / hold | 3 |
 
 ### 👤 Manual Moves Detected & Preserved
 - Respected manual app transfer: **Rogers**
@@ -49,14 +49,14 @@
 | Pos | Player | Team | Projected xP | xP/£ |
 | :--- | :--- | :--- | :--- | :--- |
 | GK | Verbruggen | BHA | 5.46 | 1.19 |
-| DEF | De Cuyper | BHA | 9.68 | 1.9 |
+| DEF | De Cuyper | BHA | 9.68 | 1.86 |
 | DEF | Calafiori | ARS | 6.42 | 1.09 |
 | DEF | Dasilva | COV | 6.01 | 1.5 |
-| MID | Cherki **(VC)** | MCI | 11.06 | 1.4 |
-| MID | Mbeumo | MUN | 9.74 | 1.23 |
-| MID | Groß | BHA | 9.71 | 1.62 |
+| MID | Cherki **(VC)** | MCI | 11.07 | 1.4 |
+| MID | Mbeumo | MUN | 9.74 | 1.25 |
+| MID | Groß | BHA | 9.72 | 1.59 |
 | MID | Rogers | CHE | 8.93 | 1.13 |
-| FWD | Haaland **(C)** | MCI | 13.06 | 0.84 |
+| FWD | Haaland **(C)** | MCI | 13.06 | 0.83 |
 | FWD | Barry | EVE | 10.86 | 1.91 |
 | FWD | McBurnie | HUL | 3.02 | 0.55 |
 
@@ -69,7 +69,7 @@
 *Auto-generated at DRY RUN (Preview for Email Review) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-10-17T10:00:00Z (699.1 min remaining)
+- **Target GW Deadline:** 2026-10-17T10:00:00Z (560.8 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
 - **Automated Chip Strategy:** `wildcard`
 - **Rationale:** Quantitative xMins optimization applied. No clash/injury swaps required; kept solver XI.

@@ -1,9 +1,9 @@
-# ⚽ FPL Gameweek 7 Decision Report
+# ⚽ FPL Gameweek 8 Decision Report
 **Status:** `DRY RUN (Preview for Email Review)`
 
 ### 🎖️ Captaincy
-- **Captain (C):** **Haaland** (xP: 13.06)
-- **Vice-Captain (VC):** **Cherki** (xP: 11.07)
+- **Captain (C):** **Haaland** (xP: 16.91)
+- **Vice-Captain (VC):** **Mbeumo** (xP: 12.46)
 
 ### ♻️ Transfer Window
 - GW1/unlimited free transfers. Wildcard chip is **not** played.
@@ -16,60 +16,58 @@
 - Injured/unavailable: 0; DGW players: 0; BGW players: 0
 
 ### 💷 Squad Liquidation
-- **Current 15 sell value (50% profit tax):** £99.8m
-- **Bank:** £0.0m
-- **Spendable budget:** £99.8m
-- **Overall rank:** 7,365,721 — chasing rank (differentials allowed)
+- **Current 15 sell value (50% profit tax):** £100.2m
+- **Bank:** £0.1m
+- **Spendable budget:** £100.3m
+- **Overall rank:** 6,750,389 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
 | :--- | :--- |
-| Raya | **Verbruggen** |
-| A.Becker | **Rushworth** |
-| Davis | **Calafiori** |
-| Saka | **Rudoni** |
-| Gibbs-White | **Cherki** |
+| A.Becker | **Verbruggen** |
+| Dasilva | **Calafiori** |
+| Hall | **Vuskovic** |
+| Bogle | **O'Shea** |
+| Saka | **Tavernier** |
+| Groß | **Rudoni** |
 | Schade | **Mbeumo** |
-| Calvert-Lewin | **Barry** |
+| Calvert-Lewin | **Evanilson** |
+| McBurnie | **João Pedro** |
 
 ### 🗺 4-GW Rolling Horizon Roadmap
 - Discounted fixture EV with temporal decay `0.9` per future GW. Only this week's transfers are submitted; later weeks are projections.
 | GW | Out | In | Note | FT after |
 | :--- | :--- | :--- | :--- | :--- |
-| GW7 | Raya, A.Becker, Davis, Saka, Gibbs-White, Schade, Calvert-Lewin | **Verbruggen, Rushworth, Calafiori, Rudoni, Cherki, Mbeumo, Barry** | committed this week | 1 |
-| GW8 | McBurnie | **Delap** | projected (net +2.7 over remaining horizon) | 1 |
+| GW8 | A.Becker, Dasilva, Hall, Bogle, Saka, Groß, Schade, Calvert-Lewin, McBurnie | **Verbruggen, Calafiori, Vuskovic, O'Shea, Tavernier, Rudoni, Mbeumo, Evanilson, João Pedro** | committed this week | 1 |
 | GW9 | — | **—** | projected bank / hold | 2 |
 | GW10 | — | **—** | projected bank / hold | 3 |
-
-### 👤 Manual Moves Detected & Preserved
-- Respected manual app transfer: **Rogers**
-- Respected manual app transfer: **McBurnie**
+| GW11 | — | **—** | projected bank / hold | 4 |
 
 ### 🟢 Starting XI
 | Pos | Player | Team | Projected xP | xP/£ |
 | :--- | :--- | :--- | :--- | :--- |
-| GK | Verbruggen | BHA | 5.46 | 1.19 |
-| DEF | De Cuyper | BHA | 9.68 | 1.86 |
-| DEF | Calafiori | ARS | 6.42 | 1.09 |
-| DEF | Dasilva | COV | 6.01 | 1.5 |
-| MID | Cherki **(VC)** | MCI | 11.07 | 1.4 |
-| MID | Mbeumo | MUN | 9.74 | 1.25 |
-| MID | Groß | BHA | 9.72 | 1.59 |
-| MID | Rogers | CHE | 8.93 | 1.13 |
-| FWD | Haaland **(C)** | MCI | 13.06 | 0.83 |
-| FWD | Barry | EVE | 10.86 | 1.91 |
-| FWD | McBurnie | HUL | 3.02 | 0.55 |
+| GK | Verbruggen | BHA | 5.47 | 1.19 |
+| DEF | De Cuyper | BHA | 10.38 | 1.96 |
+| DEF | Calafiori | ARS | 7.9 | 1.32 |
+| DEF | Vuskovic | BHA | 6.8 | 1.33 |
+| MID | Mbeumo **(VC)** | MUN | 12.46 | 1.58 |
+| MID | Tavernier | BOU | 10.13 | 1.63 |
+| MID | Rogers | CHE | 9.41 | 1.18 |
+| MID | Rudoni | COV | 9.0 | 1.84 |
+| FWD | Haaland **(C)** | MCI | 16.91 | 1.08 |
+| FWD | Evanilson | BOU | 11.26 | 1.85 |
+| FWD | João Pedro | CHE | 10.62 | 1.34 |
 
 ### 🪑 Bench Order
-1. **Rushworth** (GK) - xP: 4.97
-2. **Rudoni** (MID) - xP: 8.44
-3. **Hall** (DEF) - xP: 5.7
-4. **Bogle** (DEF) - xP: 5.31
+1. **Raya** (GK) - xP: 4.81
+2. **Cherki** (MID) - xP: 8.88
+3. **O'Shea** (DEF) - xP: 4.84
+4. **Davis** (DEF) - xP: 4.73
 
 *Auto-generated at DRY RUN (Preview for Email Review) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-10-17T10:00:00Z (560.8 min remaining)
+- **Target GW Deadline:** 2026-10-23T17:30:00Z (431.7 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
 - **Automated Chip Strategy:** `wildcard`
 - **Rationale:** Quantitative xMins optimization applied. No clash/injury swaps required; kept solver XI.

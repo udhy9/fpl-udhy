@@ -3,7 +3,7 @@
 
 ### 🎖️ Captaincy
 - **Captain (C):** **Haaland** (xP: 17.36)
-- **Vice-Captain (VC):** **Tavernier** (xP: 12.75)
+- **Vice-Captain (VC):** **Tavernier** (xP: 12.76)
 
 ### ♻️ Transfer Window
 - GW1/unlimited free transfers. Wildcard chip is **not** played.
@@ -16,10 +16,10 @@
 - Injured/unavailable: 0; DGW players: 0; BGW players: 0
 
 ### 💷 Squad Liquidation
-- **Current 15 sell value (50% profit tax):** £97.5m
+- **Current 15 sell value (50% profit tax):** £97.6m
 - **Bank:** £3.2m
-- **Spendable budget:** £100.7m
-- **Overall rank:** 6,581,425 — chasing rank (differentials allowed)
+- **Spendable budget:** £100.8m
+- **Overall rank:** 6,581,421 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
@@ -51,7 +51,7 @@
 | DEF | Bogle | LEE | 6.48 | 1.35 |
 | DEF | N.Williams | NFO | 6.15 | 1.23 |
 | DEF | Konsa | ARS | 5.12 | 1.09 |
-| MID | Tavernier **(VC)** | BOU | 12.75 | 1.99 |
+| MID | Tavernier **(VC)** | BOU | 12.76 | 1.96 |
 | MID | Mbeumo | MUN | 11.88 | 1.5 |
 | MID | Groß | BHA | 7.77 | 1.25 |
 | MID | Iwobi | FUL | 7.31 | 1.35 |
@@ -68,7 +68,7 @@
 *Auto-generated at DRY RUN (Preview for Email Review) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-10-31T11:00:00Z (696.9 min remaining)
+- **Target GW Deadline:** 2026-10-31T11:00:00Z (504.9 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
 - **Automated Chip Strategy:** `wildcard`
 - **Rationale:** Quantitative xMins optimization applied. Benched Raya to avoid CS cannibalization vs our attackers; started Verbruggen. Benched De Cuyper to avoid CS cannibalization vs our attackers; started N.Williams. Benched Gabriel to avoid CS cannibalization vs our attackers; started Konsa.

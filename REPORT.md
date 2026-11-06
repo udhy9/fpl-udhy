@@ -1,9 +1,9 @@
-# ⚽ FPL Gameweek 9 Decision Report
+# ⚽ FPL Gameweek 10 Decision Report
 **Status:** `DRY RUN (Preview for Email Review)`
 
 ### 🎖️ Captaincy
-- **Captain (C):** **Haaland** (xP: 17.36)
-- **Vice-Captain (VC):** **Tavernier** (xP: 12.76)
+- **Captain (C):** **Haaland** (xP: 17.27)
+- **Vice-Captain (VC):** **Evanilson** (xP: 12.99)
 
 ### ♻️ Transfer Window
 - GW1/unlimited free transfers. Wildcard chip is **not** played.
@@ -16,59 +16,60 @@
 - Injured/unavailable: 0; DGW players: 0; BGW players: 0
 
 ### 💷 Squad Liquidation
-- **Current 15 sell value (50% profit tax):** £97.6m
-- **Bank:** £3.2m
-- **Spendable budget:** £100.8m
-- **Overall rank:** 6,581,421 — chasing rank (differentials allowed)
+- **Current 15 sell value (50% profit tax):** £96.4m
+- **Bank:** £4.6m
+- **Spendable budget:** £101.0m
+- **Overall rank:** 6,546,257 — chasing rank (differentials allowed)
 
 ### 🔄 Planned Transfers
 | Out | In |
 | :--- | :--- |
 | A.Becker | **Verbruggen** |
 | Dasilva | **Gabriel** |
-| Hall | **Konsa** |
-| Davis | **N.Williams** |
-| Neto | **Tavernier** |
-| Cherki | **Rudoni** |
-| Rogers | **Iwobi** |
-| Schade | **Mbeumo** |
+| Hall | **Calafiori** |
+| Davis | **Van Hecke** |
+| Bogle | **Robertson** |
+| Groß | **Rudoni** |
+| Neto | **Iwobi** |
+| Rogers | **Mbeumo** |
+| Schade | **E.Le Fée** |
 | McBurnie | **Evanilson** |
-| Calvert-Lewin | **Isak** |
+| Calvert-Lewin | **Thiago** |
 
 ### 🗺 4-GW Rolling Horizon Roadmap
 - Discounted fixture EV with temporal decay `0.9` per future GW. Only this week's transfers are submitted; later weeks are projections.
 | GW | Out | In | Note | FT after |
 | :--- | :--- | :--- | :--- | :--- |
-| GW9 | A.Becker, Dasilva, Hall, Davis, Neto, Cherki, Rogers, Schade, McBurnie, Calvert-Lewin | **Verbruggen, Gabriel, Konsa, N.Williams, Tavernier, Rudoni, Iwobi, Mbeumo, Evanilson, Isak** | committed this week | 1 |
-| GW10 | — | **—** | projected bank / hold | 2 |
-| GW11 | — | **—** | projected bank / hold | 3 |
-| GW12 | — | **—** | projected bank / hold | 4 |
+| GW10 | A.Becker, Dasilva, Hall, Davis, Bogle, Groß, Neto, Rogers, Schade, McBurnie, Calvert-Lewin | **Verbruggen, Gabriel, Calafiori, Van Hecke, Robertson, Rudoni, Iwobi, Mbeumo, E.Le Fée, Evanilson, Thiago** | committed this week | 1 |
+| GW11 | Rudoni | **Rogers** | projected (net +2.6 over remaining horizon) | 1 |
+| GW12 | — | **—** | projected bank / hold | 2 |
+| GW13 | — | **—** | projected bank / hold | 3 |
 
 ### 🟢 Starting XI
 | Pos | Player | Team | Projected xP | xP/£ |
 | :--- | :--- | :--- | :--- | :--- |
-| GK | Verbruggen | BHA | 4.44 | 0.97 |
-| DEF | Bogle | LEE | 6.48 | 1.35 |
-| DEF | N.Williams | NFO | 6.15 | 1.23 |
-| DEF | Konsa | ARS | 5.12 | 1.09 |
-| MID | Tavernier **(VC)** | BOU | 12.76 | 1.96 |
-| MID | Mbeumo | MUN | 11.88 | 1.5 |
-| MID | Groß | BHA | 7.77 | 1.25 |
-| MID | Iwobi | FUL | 7.31 | 1.35 |
-| FWD | Haaland **(C)** | MCI | 17.36 | 1.1 |
-| FWD | Evanilson | BOU | 11.78 | 1.87 |
-| FWD | Isak | LIV | 11.23 | 1.23 |
+| GK | Raya | ARS | 4.83 | 0.78 |
+| DEF | Van Hecke | TOT | 8.18 | 1.64 |
+| DEF | Gabriel | ARS | 7.32 | 0.92 |
+| DEF | Calafiori | ARS | 7.15 | 1.21 |
+| MID | Tavernier | BOU | 12.56 | 1.9 |
+| MID | Iwobi | FUL | 10.4 | 1.93 |
+| MID | Mbeumo | MUN | 9.43 | 1.19 |
+| MID | E.Le Fée | SUN | 8.25 | 1.45 |
+| FWD | Haaland **(C)** | MCI | 17.27 | 1.09 |
+| FWD | Evanilson **(VC)** | BOU | 12.99 | 2.03 |
+| FWD | Thiago | BRE | 11.91 | 1.53 |
 
 ### 🪑 Bench Order
-1. **Raya** (GK) - xP: 5.0
-2. **De Cuyper** (DEF) - xP: 9.99
-3. **Gabriel** (DEF) - xP: 7.61
-4. **Rudoni** (MID) - xP: 6.9
+1. **Verbruggen** (GK) - xP: 5.19
+2. **De Cuyper** (DEF) - xP: 10.99
+3. **Rudoni** (MID) - xP: 7.81
+4. **Robertson** (DEF) - xP: 6.27
 
 *Auto-generated at DRY RUN (Preview for Email Review) window.*
 
 ### 🧠 Tactical AI Analysis
-- **Target GW Deadline:** 2026-10-31T11:00:00Z (504.9 min remaining)
+- **Target GW Deadline:** 2026-11-06T18:30:00Z (642.1 min remaining)
 - **Free Transfers Available:** 1 / 5 (in play)
 - **Automated Chip Strategy:** `wildcard`
-- **Rationale:** Quantitative xMins optimization applied. Benched Raya to avoid CS cannibalization vs our attackers; started Verbruggen. Benched De Cuyper to avoid CS cannibalization vs our attackers; started N.Williams. Benched Gabriel to avoid CS cannibalization vs our attackers; started Konsa.
+- **Rationale:** Quantitative xMins optimization applied. Benched Verbruggen to avoid CS cannibalization vs our attackers; started Raya. Benched De Cuyper to avoid CS cannibalization vs our attackers; started Calafiori.

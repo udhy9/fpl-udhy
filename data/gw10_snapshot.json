@@ -1,0 +1,211 @@
+{
+  "picks": [
+    {
+      "element": 1,
+      "position": 1,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 1,
+      "selling_price": 61,
+      "purchase_price": 61
+    },
+    {
+      "element": 112,
+      "position": 2,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 2,
+      "selling_price": 50,
+      "purchase_price": 50
+    },
+    {
+      "element": 4,
+      "position": 3,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 2,
+      "selling_price": 80,
+      "purchase_price": 80
+    },
+    {
+      "element": 8,
+      "position": 4,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 2,
+      "selling_price": 59,
+      "purchase_price": 59
+    },
+    {
+      "element": 68,
+      "position": 5,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 3,
+      "selling_price": 65,
+      "purchase_price": 65
+    },
+    {
+      "element": 261,
+      "position": 6,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 3,
+      "selling_price": 54,
+      "purchase_price": 54
+    },
+    {
+      "element": 427,
+      "position": 7,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 3,
+      "selling_price": 79,
+      "purchase_price": 79
+    },
+    {
+      "element": 542,
+      "position": 8,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 3,
+      "selling_price": 57,
+      "purchase_price": 57
+    },
+    {
+      "element": 411,
+      "position": 9,
+      "multiplier": 2,
+      "is_captain": true,
+      "is_vice_captain": false,
+      "element_type": 4,
+      "selling_price": 157,
+      "purchase_price": 156
+    },
+    {
+      "element": 79,
+      "position": 10,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": true,
+      "element_type": 4,
+      "selling_price": 64,
+      "purchase_price": 64
+    },
+    {
+      "element": 106,
+      "position": 11,
+      "multiplier": 1,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 4,
+      "selling_price": 78,
+      "purchase_price": 78
+    },
+    {
+      "element": 109,
+      "position": 12,
+      "multiplier": 0,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 1,
+      "selling_price": 46,
+      "purchase_price": 46
+    },
+    {
+      "element": 115,
+      "position": 13,
+      "multiplier": 0,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 2,
+      "selling_price": 51,
+      "purchase_price": 48
+    },
+    {
+      "element": 183,
+      "position": 14,
+      "multiplier": 0,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 3,
+      "selling_price": 49,
+      "purchase_price": 49
+    },
+    {
+      "element": 502,
+      "position": 15,
+      "multiplier": 0,
+      "is_captain": false,
+      "is_vice_captain": false,
+      "element_type": 2,
+      "selling_price": 43,
+      "purchase_price": 43
+    }
+  ],
+  "picks_last_updated": "2026-11-06T13:46:14.765134Z",
+  "chips": [
+    {
+      "id": 4,
+      "status_for_entry": "available",
+      "played_by_entry": [],
+      "name": "bboost",
+      "number": 1,
+      "start_event": 1,
+      "stop_event": 19,
+      "chip_type": "team",
+      "is_pending": false
+    },
+    {
+      "id": 5,
+      "status_for_entry": "available",
+      "played_by_entry": [],
+      "name": "3xc",
+      "number": 1,
+      "start_event": 1,
+      "stop_event": 19,
+      "chip_type": "team",
+      "is_pending": false
+    },
+    {
+      "id": 1,
+      "status_for_entry": "played",
+      "played_by_entry": [
+        6
+      ],
+      "name": "wildcard",
+      "number": 1,
+      "start_event": 2,
+      "stop_event": 19,
+      "chip_type": "transfer",
+      "is_pending": false
+    },
+    {
+      "id": 3,
+      "status_for_entry": "available",
+      "played_by_entry": [],
+      "name": "freehit",
+      "number": 1,
+      "start_event": 2,
+      "stop_event": 19,
+      "chip_type": "transfer",
+      "is_pending": false
+    }
+  ],
+  "transfers": {
+    "cost": 4,
+    "status": "cost",
+    "limit": 1,
+    "made": 11,
+    "bank": 4,
+    "value": 999
+  }
+}

@@ -1,9 +1,10 @@
 {
   "allow_transfers": true,
-  "force_chip": "wildcard",
+  "force_chip": "",
+  "max_hits": 0,
   "lock_captain": "",
   "lock_vice_captain": "",
   "must_start": [],
   "must_bench": [],
-  "notes": "force_chip=wildcard for upcoming GW. Clear force_chip after the chip is played."
+  "notes": "WC1 already used (GW6). Leave force_chip empty until WC2 (after GW19). max_hits=0 blocks paid transfers."
 }

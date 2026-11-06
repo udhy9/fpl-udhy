@@ -71,12 +71,21 @@ class FPLOptimizer:
             for c in chips
         )
         forced = self._forced_chip()
-        # GW1 is unlimited free transfers. Do not play the Wildcard chip unless forced.
-        if self.gameweek == 1 and forced != "wildcard":
+        available = self._available_chips()
+        # Unlimited only when WC/FH is already active OR force_chip is set AND still available.
+        # A stale force_chip must never unlock 15 transfers without playing the chip.
+        transfer_chip_unlocked = wildcard_active or (
+            forced in ("wildcard", "freehit") and forced in available
+        )
+        # GW1 is unlimited free transfers. Do not play Wildcard unless forced + available.
+        if self.gameweek == 1 and not transfer_chip_unlocked:
             return 15
-        if wildcard_active or forced in ("wildcard", "freehit"):
+        if transfer_chip_unlocked:
             return 15
-        return max(0, int(self.free_transfers or 0))
+        # Optional: allow a capped number of paid hits when explicitly configured.
+        max_hits = int(self.overrides.get("max_hits") or 0)
+        ft = max(0, int(self.free_transfers or 0))
+        return ft + max(0, max_hits)
 
     def _name_matches(self, pid, names):
         name = self.elements[pid]["web_name"].lower()

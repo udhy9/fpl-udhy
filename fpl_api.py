@@ -686,11 +686,22 @@ class FPLClient:
         if res.status_code in (200, 201, 204):
             body = self._require_write_success(res, "Transfer submit")
             spent = int(body.get("spent_points") or 0) if isinstance(body, dict) else 0
-            if spent > 0:
+            if spent > 0 and not chip:
                 raise RuntimeError(
                     f"Transfers cost a {spent}-point hit unexpectedly. Check the live FPL squad."
                 )
-            return body
+            # Empty 200 bodies skip spent_points — verify live FT/hits after POST.
+            live = self.get_my_team(require_auth=True)
+            tr = live.get("transfers") or {}
+            made = int(tr.get("made") or 0)
+            limit = tr.get("limit")
+            if chip is None and limit is not None and made > int(limit):
+                hits = made - int(limit)
+                raise RuntimeError(
+                    f"Transfers applied with {hits} hit(s) ({made} made, {limit} free) and no chip. "
+                    "Undo on the FPL site before the deadline if this was unintended."
+                )
+            return body if isinstance(body, dict) and body else {"status": "success", "status_code": res.status_code}
 
         print(
             f"Direct transfer POST returned HTTP {res.status_code}: {(res.text or '')[:400]}. "

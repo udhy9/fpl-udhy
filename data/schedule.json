@@ -2,9 +2,9 @@
   "target_gameweek": 10,
   "target_gw_name": "Gameweek 10",
   "deadline_utc": "2026-11-06T18:30:00Z",
-  "minutes_remaining": 283.8,
-  "last_checked_utc": "2026-11-06T13:46:15.009553+00:00",
+  "minutes_remaining": 180.9,
+  "last_checked_utc": "2026-11-06T15:29:05.746098+00:00",
   "execution_completed": true,
   "mode": "execute",
-  "skipped": false
+  "skipped": true
 }
